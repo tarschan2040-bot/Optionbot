@@ -28,5 +28,5 @@ async def health_check():
 
 @router.get("/me")
 async def get_me(tier_info: dict = Depends(get_tier_info)):
-    """Return the current user's tier info. Requires auth."""
+    """Return the current user's tier info including scan limits and usage."""
     return tier_info

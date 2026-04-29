@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.auth import get_current_user
-from backend.tier import get_tier_info, FREE_RESULT_LIMIT
+from backend.tier import get_tier_info
 from core.config import ScannerConfig
 from core.scanner import OptionScanner
 from data.supabase_client import SupabaseClient
@@ -68,6 +68,12 @@ class ScanResultsResponse(BaseModel):
     config_hash: Optional[str]
     result_count: int
     results: List[ScanResultItem]
+    # Tier info for frontend
+    tier: Optional[str] = None
+    visible_results: Optional[int] = None   # None = all visible
+    scans_remaining: Optional[int] = None
+    scans_per_day: Optional[int] = None
+    can_scan: bool = True
 
 
 class ScanHistoryItem(BaseModel):
@@ -183,10 +189,10 @@ def _run_scan_background(user_id: str, config: ScannerConfig):
 async def get_scan_results(tier_info: dict = Depends(get_tier_info)):
     """
     Get the most recent scan results for the authenticated user.
-    Free users: top 5 only. Pro users: all results.
+    Returns all results but marks how many are visible based on tier.
     """
     user_id = tier_info["user_id"]
-    result_limit = tier_info["result_limit"]  # None for pro, 5 for free
+    visible_limit = tier_info["visible_results"]  # None = all, 3 for free
     supabase = _get_supabase()
 
     try:
@@ -201,26 +207,31 @@ async def get_scan_results(tier_info: dict = Depends(get_tier_info)):
         rows = resp.data or []
         if not rows:
             return ScanResultsResponse(
-                scan_time=None,
-                slot_label=None,
-                config_hash=None,
-                result_count=0,
-                results=[],
+                scan_time=None, slot_label=None, config_hash=None,
+                result_count=0, results=[],
+                tier=tier_info["tier"],
+                visible_results=visible_limit,
+                scans_remaining=tier_info["scans_remaining"],
+                scans_per_day=tier_info["scans_per_day"],
+                can_scan=tier_info["can_scan"],
             )
 
         row = rows[0]
         raw_results = row.get("results", [])
+        total_count = row.get("opportunity_count", len(raw_results))
 
-        # Apply tier limit
-        if result_limit is not None:
-            raw_results = raw_results[:result_limit]
-
+        # Return ALL results — frontend handles blurring
         return ScanResultsResponse(
             scan_time=row.get("scan_timestamp"),
             slot_label=row.get("slot_label"),
             config_hash=row.get("config_hash"),
-            result_count=row.get("opportunity_count", len(raw_results)),
+            result_count=total_count,
             results=[ScanResultItem(**r) for r in raw_results],
+            tier=tier_info["tier"],
+            visible_results=visible_limit,
+            scans_remaining=tier_info["scans_remaining"],
+            scans_per_day=tier_info["scans_per_day"],
+            can_scan=tier_info["can_scan"],
         )
 
     except Exception as e:
@@ -234,15 +245,16 @@ async def trigger_scan(
     tier_info: dict = Depends(get_tier_info),
 ):
     """
-    Trigger a manual scan for the authenticated user.
-    Pro only — free users see delayed results from scheduled scans.
+    Trigger a manual scan. All tiers can scan, with daily limits.
+    Free: 3/day, Pro: 30/day, Max: unlimited.
     """
     user_id = tier_info["user_id"]
 
-    if not tier_info["is_pro"]:
+    if not tier_info["can_scan"]:
+        limit = tier_info["scans_per_day"]
         raise HTTPException(
-            status_code=403,
-            detail="Manual scans require a Pro subscription. Free users receive daily delayed results.",
+            status_code=429,
+            detail=f"Daily scan limit reached ({limit}/{limit}). Upgrade for more scans.",
         )
 
     # Check for duplicate

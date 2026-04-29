@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.auth import get_current_user
-from backend.tier import get_tier_info, FREE_TICKER_LIMIT
+from backend.tier import get_tier_info
 from core.config import ScannerConfig
 from data.supabase_client import SupabaseClient
 

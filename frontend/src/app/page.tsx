@@ -334,64 +334,57 @@ export default function LandingPage() {
 
       {/* ── Pricing ─────────────────────────────────────────────── */}
       <section id="pricing" className="px-6 py-20 bg-gray-900/30">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <h2 className="text-3xl font-bold text-center mb-4">Simple, Transparent Pricing</h2>
           <p className="text-gray-400 text-center mb-14">
-            Start free. Upgrade when you&apos;re ready for full power.
+            Start free. Upgrade when you&apos;re ready for more power.
           </p>
-          <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-6">
             {/* Free */}
-            <div className="bg-gray-900 rounded-2xl p-8 border border-gray-800">
+            <div className="bg-gray-900 rounded-2xl p-7 border border-gray-800">
               <h3 className="text-2xl font-bold">Free</h3>
-              <div className="mt-2 mb-1">
-                <span className="text-4xl font-bold">$0</span>
-              </div>
-              <p className="text-gray-500 text-sm mb-6">Free forever</p>
-              <p className="text-gray-400 text-sm mb-8">Get started with basic scanning</p>
-              <Link
-                href="/login"
-                className="block w-full py-3 bg-gray-800 text-center text-gray-300 font-semibold rounded-lg mb-8"
-              >
-                Get Started
-              </Link>
+              <div className="mt-2 mb-1"><span className="text-4xl font-bold">$0</span></div>
+              <p className="text-gray-500 text-xs mb-6">Free forever</p>
+              <Link href="/login" className="block w-full py-3 bg-gray-800 text-center text-gray-300 font-semibold rounded-lg mb-7">Get Started</Link>
               <div className="space-y-3 text-sm">
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Daily top 5 results (delayed)</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">2 tickers</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Default scoring parameters</span></div>
-                <div className="flex items-start"><CrossMark /><span className="text-gray-600">Real-time scans</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">3 scans per day</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Top 3 results visible</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Default parameters</span></div>
+                <div className="flex items-start"><CrossMark /><span className="text-gray-600">Full results</span></div>
                 <div className="flex items-start"><CrossMark /><span className="text-gray-600">Custom parameters</span></div>
                 <div className="flex items-start"><CrossMark /><span className="text-gray-600">Portfolio tracking</span></div>
-                <div className="flex items-start"><CrossMark /><span className="text-gray-600">Email / Telegram alerts</span></div>
               </div>
             </div>
             {/* Pro */}
-            <div className="bg-gray-900 rounded-2xl p-8 border border-emerald-700 ring-1 ring-emerald-700/50 relative">
-              <span className="absolute -top-3 left-8 px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-full uppercase tracking-wide">
-                Most Popular
-              </span>
+            <div className="bg-gray-900 rounded-2xl p-7 border border-emerald-700 ring-1 ring-emerald-700/50 relative">
+              <span className="absolute -top-3 left-7 px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-full uppercase tracking-wide">Most Popular</span>
               <h3 className="text-2xl font-bold">Pro</h3>
-              <div className="mt-2 mb-1">
-                <span className="text-4xl font-bold">$49</span>
-                <span className="text-gray-400 text-sm">/month</span>
-              </div>
-              <p className="text-gray-500 text-sm mb-6">$39/mo billed annually</p>
-              <p className="text-gray-400 text-sm mb-8">Full power for active traders</p>
-              <Link
-                href="/login"
-                className="block w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-center text-white font-semibold rounded-lg transition-colors mb-8"
-              >
-                Start Free Trial
-              </Link>
+              <div className="mt-2 mb-1"><span className="text-4xl font-bold">$19.99</span><span className="text-gray-400 text-sm">/mo</span></div>
+              <p className="text-gray-500 text-xs mb-6">$15.99/mo billed annually</p>
+              <Link href="/login" className="block w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-center text-white font-semibold rounded-lg transition-colors mb-7">Start Free Trial</Link>
               <div className="space-y-3 text-sm">
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Real-time scans (3 daily + manual)</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Unlimited tickers</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Full parameter customisation</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Custom scoring weights</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Trade workflow (Star → Confirm → Track)</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Live portfolio with P&L</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Email alerts (daily digest)</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Telegram bot integration</span></div>
-                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Priority scan queue</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">30 scans per day</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">All results visible</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Full parameter control</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Portfolio (10 trades)</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Live P&L tracking</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Email alerts</span></div>
+              </div>
+            </div>
+            {/* Max */}
+            <div className="bg-gray-900 rounded-2xl p-7 border border-gray-800 relative">
+              <span className="absolute -top-3 left-7 px-3 py-1 bg-gray-700 text-gray-300 text-xs font-bold rounded-full uppercase tracking-wide">Full Power</span>
+              <h3 className="text-2xl font-bold">Max</h3>
+              <div className="mt-2 mb-1"><span className="text-4xl font-bold">$49.99</span><span className="text-gray-400 text-sm">/mo</span></div>
+              <p className="text-gray-500 text-xs mb-6">$39.99/mo billed annually</p>
+              <Link href="/login" className="block w-full py-3 bg-gray-800 hover:bg-gray-700 text-center text-white font-semibold rounded-lg border border-gray-700 transition-colors mb-7">Start Free Trial</Link>
+              <div className="space-y-3 text-sm">
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Unlimited scans</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">All results visible</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Full parameter control</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Unlimited portfolio</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Live P&L + alerts</span></div>
+                <div className="flex items-start"><CheckMark /><span className="text-gray-300">Priority queue + API</span></div>
               </div>
             </div>
           </div>
