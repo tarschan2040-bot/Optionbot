@@ -35,19 +35,10 @@ app = FastAPI(
 
 # ── CORS — allow frontend (localhost dev + production domain) ─────────────
 
-_frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
-_allowed_origins = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "https://optionbot-theta.vercel.app",   # production frontend (hardcoded as backup)
-]
-if _frontend_url and _frontend_url not in _allowed_origins:
-    _allowed_origins.append(_frontend_url)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
