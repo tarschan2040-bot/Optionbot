@@ -1,0 +1,22 @@
+# OptionBot SaaS Backend — Phase 1
+# Install: pip install -r backend/requirements.txt
+
+# Web framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
+# Auth — Supabase JWT verification
+python-jose[cryptography]>=3.3.0
+httpx>=0.27.0
+
+# Supabase client (already in project, pinned here for backend)
+supabase>=2.0.0
+
+# Env and config
+python-dotenv>=1.0.0
+
+# CORS
+# (included in fastapi — no extra dep)
+
+# Scanner dependencies (already installed, listed for completeness)
+# scipy, yfinance, pytz — see project root requirements

@@ -1,0 +1,39 @@
+# ── Secrets (NEVER commit) ────────────────────────────
+.env
+.env.local
+.env.production
+frontend/.env.local
+frontend/.env.production
+
+# ── Python ────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# ── Node / Next.js ────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# ── IDE ───────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ── Testing / cache ──────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Scan outputs ──────────────────────────────────────
+scan_results_*.csv
+
+# ── Archives ──────────────────────────────────────────
+archive/

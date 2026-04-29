@@ -1,0 +1,273 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © OptionBot — Mean Reversion Composite Scanner for Option Selling
+//
+// PURPOSE:
+//   Combines RSI(5) + Z-Score(20) + ROC Percentile Rank(100) into a single
+//   composite score (0–100) to identify optimal timing for:
+//     • Selling Covered Calls  — when price is overbought (likely to revert DOWN)
+//     • Selling Cash-Secured Puts — when price is oversold  (likely to revert UP)
+//
+// BACKGROUND COLOURS:
+//     RED    = Overbought zone → good time to SELL COVERED CALL
+//     GREEN  = Oversold zone   → good time to SELL CASH-SECURED PUT
+//
+// WEIGHTING (research-backed):
+//     RSI(5):              40%  — best mean reversion oscillator for 30-45 DTE
+//     Z-Score(20):         40%  — displacement from mean, vol-normalized
+//     ROC %Rank(100):      20%  — surge magnitude ranking (Connors method)
+//
+// TREND GUARD:
+//     When price is >15% above SMA(200), overbought signals are capped (strong uptrend).
+//     When price is >15% below SMA(200), oversold signals are capped (strong downtrend).
+
+//@version=5
+indicator("Mean Reversion Scanner — Option Selling", shorttitle="MR Scanner",
+     overlay=false, format=format.price, precision=1)
+
+// ════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// --- Component Settings ---
+grp_rsi   = "RSI Settings"
+rsiLen    = input.int(5,   "RSI Period",        minval=2, maxval=20,  group=grp_rsi)
+rsiOB     = input.int(75,  "RSI Overbought",    minval=60, maxval=95, group=grp_rsi)
+rsiOS     = input.int(25,  "RSI Oversold",       minval=5, maxval=40, group=grp_rsi)
+
+grp_z     = "Z-Score Settings"
+zLen      = input.int(20,  "Z-Score Lookback",   minval=5, maxval=50,  group=grp_z)
+zOB       = input.float(1.5, "Z-Score Overbought", minval=0.5, maxval=3.0, step=0.1, group=grp_z)
+zOS       = input.float(-1.5, "Z-Score Oversold",  minval=-3.0, maxval=-0.5, step=0.1, group=grp_z)
+
+grp_roc   = "ROC Percentile Rank Settings"
+rocLen    = input.int(100, "ROC Lookback (days)", minval=20, maxval=252, group=grp_roc)
+
+// --- Weights ---
+grp_w     = "Scoring Weights"
+wRSI      = input.float(0.40, "RSI Weight",          minval=0, maxval=1, step=0.05, group=grp_w)
+wZ        = input.float(0.40, "Z-Score Weight",       minval=0, maxval=1, step=0.05, group=grp_w)
+wROC      = input.float(0.20, "ROC %Rank Weight",     minval=0, maxval=1, step=0.05, group=grp_w)
+
+// --- Signal Thresholds ---
+grp_sig   = "Signal Thresholds"
+sigStrong = input.int(80, "Strong Signal",       minval=70, maxval=95, group=grp_sig)
+sigMod    = input.int(70, "Moderate Signal",     minval=55, maxval=85, group=grp_sig)
+sigModLow = input.int(30, "Moderate Oversold",   minval=15, maxval=45, group=grp_sig)
+sigStrongLow = input.int(20, "Strong Oversold",  minval=5, maxval=30, group=grp_sig)
+
+// --- Trend Guard ---
+grp_tg    = "Trend Guard"
+useTG     = input.bool(true, "Enable Trend Guard", group=grp_tg)
+tgSmaLen  = input.int(200, "SMA Period",         minval=50, maxval=300, group=grp_tg)
+tgPct     = input.float(15.0, "Trend Threshold %", minval=5, maxval=30, step=1, group=grp_tg)
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMPONENT 1: RSI(5)
+// ════════════════════════════════════════════════════════════════════════════
+// Already 0–100, used directly.
+
+rsiVal = ta.rsi(close, rsiLen)
+rsiNorm = rsiVal / 100.0   // normalise to 0–1
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMPONENT 2: Z-SCORE (20-day)
+// ════════════════════════════════════════════════════════════════════════════
+// Z = (price - SMA) / StdDev
+// Mapped to 0–1 via: (Z + 3) / 6, clamped. So Z=0 → 0.5, Z=+2 → 0.83, Z=-2 → 0.17
+
+zMean  = ta.sma(close, zLen)
+zStd   = ta.stdev(close, zLen)
+zScore = zStd != 0 ? (close - zMean) / zStd : 0.0
+zNorm  = math.max(0.0, math.min(1.0, (zScore + 3.0) / 6.0))
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMPONENT 3: ROC PERCENTILE RANK (100-day) — Connors Method
+// ════════════════════════════════════════════════════════════════════════════
+// Today's 1-day ROC ranked as a percentile vs the past 100 days.
+// Output: 0–100 (high = today's move is larger than most recent days)
+
+rocToday = close != 0 ? (close - close[1]) / close[1] : 0.0
+
+// Count how many of the past rocLen days had a smaller ROC than today
+rocRankCount(src, len) =>
+    count = 0
+    for i = 1 to len
+        pastROC = src[i] != 0 ? (src[i] - src[i+1]) / src[i+1] : 0.0
+        if rocToday > pastROC
+            count += 1
+    count
+
+rocCount = rocRankCount(close, rocLen)
+rocPctRank = (rocCount / rocLen) * 100.0
+rocNorm = rocPctRank / 100.0   // normalise to 0–1
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMPOSITE SCORE (0–100)
+// ════════════════════════════════════════════════════════════════════════════
+// Weighted sum of normalised components, then scale back to 0–100.
+
+totalWeight = wRSI + wZ + wROC
+rawComposite = totalWeight > 0 ? ((rsiNorm * wRSI) + (zNorm * wZ) + (rocNorm * wROC)) / totalWeight : 0.5
+composite = rawComposite * 100.0
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// TREND GUARD
+// ════════════════════════════════════════════════════════════════════════════
+// Caps extreme signals when price is far from SMA(200) in a strong trend.
+// In a strong uptrend, overbought signals may NOT revert — cap the score.
+// In a strong downtrend, oversold signals may NOT revert — floor the score.
+
+sma200 = ta.sma(close, tgSmaLen)
+distFromSma = sma200 != 0 ? ((close - sma200) / sma200) * 100.0 : 0.0
+
+trendWarning = useTG and math.abs(distFromSma) > tgPct
+strongUptrend   = useTG and distFromSma > tgPct
+strongDowntrend = useTG and distFromSma < -tgPct
+
+// Apply caps: in strong uptrend, cap composite at 65 (suppress overbought signal)
+//             in strong downtrend, floor composite at 35 (suppress oversold signal)
+compositeFinal = composite
+if strongUptrend and composite > 65
+    compositeFinal := 65.0
+if strongDowntrend and composite < 35
+    compositeFinal := 35.0
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// SIGNAL CLASSIFICATION
+// ════════════════════════════════════════════════════════════════════════════
+
+isStrongOB  = compositeFinal >= sigStrong         // Strong sell-call signal
+isModOB     = compositeFinal >= sigMod and compositeFinal < sigStrong
+isStrongOS  = compositeFinal <= sigStrongLow      // Strong sell-put signal
+isModOS     = compositeFinal <= sigModLow and compositeFinal > sigStrongLow
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLOTTING
+// ════════════════════════════════════════════════════════════════════════════
+
+// --- Background Highlighting ---
+bgColor = isStrongOB  ? color.new(color.red, 60) :
+     isModOB     ? color.new(color.red, 82) :
+     isStrongOS  ? color.new(color.green, 60) :
+     isModOS     ? color.new(color.green, 82) :
+     na
+
+bgcolor(bgColor, title="Signal Background")
+
+// --- Composite Score Line ---
+plot(compositeFinal, "Composite Score", color=color.new(color.white, 0), linewidth=2)
+
+// --- Threshold Lines ---
+hlineOB2  = hline(sigStrong,    "Strong Overbought", color=color.new(color.red, 50),   linestyle=hline.style_solid)
+hlineOB1  = hline(sigMod,       "Mod. Overbought",   color=color.new(color.red, 75),   linestyle=hline.style_dashed)
+hlineMid  = hline(50,           "Neutral",            color=color.new(color.gray, 60),  linestyle=hline.style_dotted)
+hlineOS1  = hline(sigModLow,    "Mod. Oversold",      color=color.new(color.green, 75), linestyle=hline.style_dashed)
+hlineOS2  = hline(sigStrongLow, "Strong Oversold",    color=color.new(color.green, 50), linestyle=hline.style_solid)
+
+// --- Fill zones between threshold lines for visual clarity ---
+fill(hlineOB2, hlineOB1, color=color.new(color.red, 90),   title="Overbought Zone")
+fill(hlineOS2, hlineOS1, color=color.new(color.green, 90),  title="Oversold Zone")
+
+// --- Individual Component Sub-Plots (toggle via eye icon) ---
+plot(rsiVal,       "RSI(5)",         color=color.new(color.orange, 40), linewidth=1, display=display.none)
+plot(zScore * 25 + 50, "Z-Score (scaled)", color=color.new(color.aqua, 40), linewidth=1, display=display.none)
+plot(rocPctRank,   "ROC %Rank",      color=color.new(color.yellow, 40), linewidth=1, display=display.none)
+
+// --- Trend Guard Warning Marker ---
+plotshape(trendWarning and (isStrongOB or isStrongOS) ? compositeFinal : na,
+     title="Trend Guard Active", style=shape.xcross, location=location.absolute,
+     color=color.new(color.orange, 0), size=size.small)
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// LABELS (on strong signals only, to avoid clutter)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Sell Covered Call label
+if isStrongOB and not isStrongOB[1]
+    label.new(bar_index, compositeFinal + 3,
+         "SELL CC\nScore: " + str.tostring(compositeFinal, "#.0"),
+         style=label.style_label_down, color=color.red,
+         textcolor=color.white, size=size.small)
+
+// Sell Cash-Secured Put label
+if isStrongOS and not isStrongOS[1]
+    label.new(bar_index, compositeFinal - 3,
+         "SELL CSP\nScore: " + str.tostring(compositeFinal, "#.0"),
+         style=label.style_label_up, color=color.green,
+         textcolor=color.white, size=size.small)
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// INFO TABLE — top-right dashboard showing current readings
+// ════════════════════════════════════════════════════════════════════════════
+
+var table dash = table.new(position.top_right, 2, 8, border_width=1)
+
+if barstate.islast
+    // Header
+    table.cell(dash, 0, 0, "Component",        text_color=color.white, bgcolor=color.gray, text_size=size.small)
+    table.cell(dash, 1, 0, "Value",             text_color=color.white, bgcolor=color.gray, text_size=size.small)
+
+    // RSI
+    rsiColor = rsiVal > rsiOB ? color.red : rsiVal < rsiOS ? color.green : color.new(color.gray, 50)
+    table.cell(dash, 0, 1, "RSI(" + str.tostring(rsiLen) + ")",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(rsiVal, "#.1"),
+         text_color=color.white, bgcolor=rsiColor, text_size=size.small)
+
+    // Z-Score
+    zColor = zScore > zOB ? color.red : zScore < zOS ? color.green : color.new(color.gray, 50)
+    table.cell(dash, 0, 2, "Z-Score(" + str.tostring(zLen) + ")",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(zScore, "#.##"),
+         text_color=color.white, bgcolor=zColor, text_size=size.small)
+
+    // ROC %Rank
+    rocColor = rocPctRank > 80 ? color.red : rocPctRank < 20 ? color.green : color.new(color.gray, 50)
+    table.cell(dash, 0, 3, "ROC %Rank(" + str.tostring(rocLen) + ")",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(rocPctRank, "#.0") + "%",
+         text_color=color.white, bgcolor=rocColor, text_size=size.small)
+
+    // Composite
+    compColor = isStrongOB ? color.red : isModOB ? color.new(color.red, 50) :
+         isStrongOS ? color.green : isModOS ? color.new(color.green, 50) :
+         color.new(color.gray, 50)
+    table.cell(dash, 0, 4, "COMPOSITE",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small, text_font_family=font.family_monospace)
+    table.cell(dash, 1, 4, str.tostring(compositeFinal, "#.0"),
+         text_color=color.white, bgcolor=compColor, text_size=size.small, text_font_family=font.family_monospace)
+
+    // Trend Guard
+    tgText = strongUptrend ? "STRONG ↑" : strongDowntrend ? "STRONG ↓" : "NORMAL"
+    tgColor = trendWarning ? color.orange : color.new(color.gray, 50)
+    table.cell(dash, 0, 5, "Trend Guard",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(dash, 1, 5, tgText + " (" + str.tostring(distFromSma, "#.1") + "%)",
+         text_color=color.white, bgcolor=tgColor, text_size=size.small)
+
+    // Signal
+    sigText  = isStrongOB ? "SELL CC ★★" : isModOB ? "SELL CC ★" :
+         isStrongOS ? "SELL CSP ★★" : isModOS ? "SELL CSP ★" : "NO SIGNAL"
+    sigColor = isStrongOB ? color.red : isModOB ? color.new(color.red, 40) :
+         isStrongOS ? color.green : isModOS ? color.new(color.green, 40) :
+         color.new(color.gray, 70)
+    table.cell(dash, 0, 6, "SIGNAL",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small, text_font_family=font.family_monospace)
+    table.cell(dash, 1, 6, sigText,
+         text_color=color.white, bgcolor=sigColor, text_size=size.small, text_font_family=font.family_monospace)
+
+    // SMA Distance
+    table.cell(dash, 0, 7, "SMA(" + str.tostring(tgSmaLen) + ") Dist",
+         text_color=color.white, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(dash, 1, 7, str.tostring(distFromSma, "#.1") + "%",
+         text_color=color.white, bgcolor=color.new(color.gray, 50), text_size=size.small)

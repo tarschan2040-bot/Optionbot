@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ken's Trading OS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0e1a; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+
+    /* Cards */
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 0.75rem; }
+
+    /* Badges */
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; }
+    .badge-cc    { background: rgba(59,130,246,0.18); color: #93c5fd; }
+    .badge-csp   { background: rgba(139,92,246,0.18); color: #c4b5fd; }
+    .badge-pending  { background: rgba(75,85,99,0.3);   color: #9ca3af; }
+    .badge-starred  { background: rgba(245,158,11,0.2); color: #fcd34d; }
+    .badge-approved { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+    .badge-placed   { background: rgba(59,130,246,0.2); color: #93c5fd; }
+    .badge-rejected { background: rgba(239,68,68,0.2);  color: #fca5a5; }
+    .badge-open     { background: rgba(59,130,246,0.15); color: #93c5fd; }
+    .badge-closed   { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+
+    /* Score colours */
+    .score-high { color: #10b981; font-weight: 700; }
+    .score-mid  { color: #f59e0b; font-weight: 700; }
+    .score-low  { color: #ef4444; font-weight: 700; }
+
+    /* Tabs */
+    .tab-btn { padding: 8px 18px; border-radius: 8px 8px 0 0; font-weight: 500; font-size: 0.875rem;
+               cursor: pointer; border: 1px solid transparent; border-bottom: none; transition: all 0.15s; }
+    .tab-btn.active { background: #111827; border-color: #1f2937; color: #10b981; }
+    .tab-btn:not(.active) { color: #6b7280; }
+    .tab-btn:not(.active):hover { color: #9ca3af; }
+
+    /* Sub-tabs */
+    .sub-tab { padding: 5px 14px; border-radius: 6px; font-size: 0.82rem; cursor: pointer; transition: all 0.15s; }
+    .sub-tab.active { background: rgba(16,185,129,0.15); color: #10b981; font-weight: 600; }
+    .sub-tab:not(.active) { color: #6b7280; }
+    .sub-tab:not(.active):hover { color: #9ca3af; background: rgba(255,255,255,0.04); }
+
+    /* Tables */
+    table   { width: 100%; border-collapse: collapse; }
+    th      { text-align: left; padding: 10px 12px; font-size: 0.72rem; font-weight: 600;
+              text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; border-bottom: 1px solid #1f2937; white-space: nowrap; }
+    td      { padding: 10px 12px; font-size: 0.85rem; border-bottom: 1px solid rgba(31,41,55,0.5);
+              color: #d1d5db; vertical-align: middle; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    tr:last-child td { border-bottom: none; }
+
+    /* PIN input */
+    .pin-input { background: #1f2937; border: 1px solid #374151; border-radius: 8px; color: white;
+                 font-size: 1.6rem; letter-spacing: 0.6rem; text-align: center; padding: 12px 20px;
+                 outline: none; width: 170px; }
+    .pin-input:focus { border-color: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); }
+
+    /* Spinner */
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    /* PnL colours */
+    .pnl-pos { color: #10b981; font-weight: 600; }
+    .pnl-neg { color: #ef4444; font-weight: 600; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+
+    /* Mobile: hide less important columns */
+    @media (max-width: 640px) {
+      .hide-sm { display: none; }
+    }
+  </style>
+</head>
+<body class="min-h-screen text-gray-100">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PIN GATE                                                        -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="pin-gate" class="min-h-screen flex items-center justify-center p-4">
+  <div class="card p-8 text-center max-w-xs w-full">
+    <div class="text-5xl mb-4">🤖</div>
+    <h1 class="text-xl font-bold text-white mb-1">Ken's Trading OS</h1>
+    <p class="text-gray-400 text-sm mb-6">Enter PIN to access dashboard</p>
+    <input type="password" id="pin-input" class="pin-input" placeholder="••••" maxlength="4"
+           oninput="if(this.value.length===4) checkPin()" />
+    <p class="text-gray-600 text-xs mt-3">Auto-submits on 4 digits</p>
+    <p id="pin-error" class="text-red-400 text-sm mt-3 hidden">Incorrect PIN — try again</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- DASHBOARD                                                       -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="dashboard" class="hidden min-h-screen">
+
+  <!-- HEADER -->
+  <div class="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-10 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">🤖</span>
+        <div>
+          <h1 class="text-base font-bold text-white leading-tight">Ken's Trading OS</h1>
+          <p class="text-xs text-gray-500">TSLA Wheel Strategy</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="text-right hidden sm:block">
+          <p class="text-xs text-gray-600">Last updated</p>
+          <p id="last-updated" class="text-xs text-gray-400 font-mono">—</p>
+        </div>
+        <div id="countdown-badge" class="text-xs text-gray-600 hidden sm:block font-mono">
+          ↻ <span id="countdown">60</span>s
+        </div>
+        <button id="refresh-btn" onclick="refreshAll()"
+                class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-300 transition-colors border border-gray-700">
+          <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-7xl mx-auto px-4 py-5">
+
+    <!-- ERROR BANNER -->
+    <div id="error-banner"
+         class="hidden mb-4 p-3 bg-red-900/30 border border-red-800/60 rounded-lg text-red-300 text-sm">
+    </div>
+
+    <!-- SUMMARY CARDS -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div class="card p-4">
+        <p class="text-xs text-gray-500 mb-1">⭐ Starred</p>
+        <p id="stat-starred" class="text-3xl font-bold text-amber-400">—</p>
+        <p class="text-xs text-gray-600 mt-0.5">awaiting review</p>
+      </div>
+      <div class="card p-4">
+        <p class="text-xs text-gray-500 mb-1">✅ Approved</p>
+        <p id="stat-approved" class="text-3xl font-bold text-emerald-400">—</p>
+        <p class="text-xs text-gray-600 mt-0.5">ready to place</p>
+      </div>
+      <div class="card p-4">
+        <p class="text-xs text-gray-500 mb-1">📊 Open Positions</p>
+        <p id="stat-open" class="text-3xl font-bold text-blue-400">—</p>
+        <p class="text-xs text-gray-600 mt-0.5">live trades</p>
+      </div>
+      <div class="card p-4">
+        <p class="text-xs text-gray-500 mb-1">💰 Total Trades</p>
+        <p id="stat-trades" class="text-3xl font-bold text-purple-400">—</p>
+        <p class="text-xs text-gray-600 mt-0.5">all time (trade log)</p>
+      </div>
+    </div>
+
+    <!-- TAB NAVIGATION -->
+    <div class="flex gap-1 flex-wrap">
+      <button class="tab-btn active" id="tab-candidates"  onclick="setTab('candidates')">📋 Candidates</button>
+      <button class="tab-btn"        id="tab-positions"   onclick="setTab('positions')">📊 Positions</button>
+      <button class="tab-btn"        id="tab-history"     onclick="setTab('history')">📈 History</button>
+      <button class="tab-btn"        id="tab-performance" onclick="setTab('performance')">🏆 Performance</button>
+      <button class="tab-btn"        id="tab-scans"       onclick="setTab('scans')">🗂️ Scans</button>
+    </div>
+
+    <!-- TAB PANEL -->
+    <div class="card rounded-tl-none p-4 md:p-5">
+
+      <!-- ─── CANDIDATES TAB ─── -->
+      <div id="content-candidates">
+        <div class="flex gap-2 mb-4 flex-wrap">
+          <button class="sub-tab active" id="sub-starred"  onclick="setCandidateFilter('starred')">⭐ Starred</button>
+          <button class="sub-tab"        id="sub-approved" onclick="setCandidateFilter('approved')">✅ Approved</button>
+          <button class="sub-tab"        id="sub-placed"   onclick="setCandidateFilter('placed')">🔵 Placed</button>
+          <button class="sub-tab"        id="sub-pending"  onclick="setCandidateFilter('pending')">🕐 Pending</button>
+        </div>
+        <div id="candidates-wrap" class="overflow-x-auto">
+          <div class="text-gray-500 text-sm text-center py-10">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ─── POSITIONS TAB ─── -->
+      <div id="content-positions" class="hidden">
+        <div id="positions-wrap" class="overflow-x-auto">
+          <div class="text-gray-500 text-sm text-center py-10">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ─── HISTORY TAB ─── -->
+      <div id="content-history" class="hidden">
+        <div id="history-wrap" class="overflow-x-auto">
+          <div class="text-gray-500 text-sm text-center py-10">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ─── PERFORMANCE TAB ─── -->
+      <div id="content-performance" class="hidden">
+        <div id="performance-wrap">
+          <div class="text-gray-500 text-sm text-center py-10">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ─── SCANS TAB ─── -->
+      <div id="content-scans" class="hidden">
+        <div id="scans-wrap">
+          <div class="text-gray-500 text-sm text-center py-10">Loading…</div>
+        </div>
+      </div>
+
+    </div><!-- /card -->
+
+    <!-- FOOTER -->
+    <div class="mt-3 text-center text-xs text-gray-700">
+      Auto-refresh every 60s &nbsp;·&nbsp; Data: Supabase &nbsp;·&nbsp; Ken's Trading OS
+    </div>
+
+  </div><!-- /max-w -->
+</div><!-- /dashboard -->
+
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// CONFIG  ←  Change PIN here if you want a different access code
+// ═══════════════════════════════════════════════════════════════════
+const CFG = {
+  SUPABASE_URL : 'https://eaphmnbbsfvuxzbmsmos.supabase.co',
+  SUPABASE_KEY : 'sb_publishable_SeeyGbEaCcORgudxp9RRdA_Oh-sHgM-',
+  PIN          : '1028',   // ← Change this 4-digit PIN to anything you like
+  REFRESH_SECS : 60,
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+const S = {
+  tab         : 'candidates',
+  subTab      : 'starred',
+  cands       : { starred:[], approved:[], placed:[], pending:[] },
+  tradeLog    : [],
+  scanHistory : [],
+  scanHistLoaded : false,
+  scanHistSel    : new Set(),
+  scanHistExpand : new Set(),
+  loading     : false,
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// PIN GATE
+// ═══════════════════════════════════════════════════════════════════
+function checkPin() {
+  const val = document.getElementById('pin-input').value;
+  if (val === CFG.PIN) {
+    sessionStorage.setItem('tos_auth', '1');
+    show('dashboard');
+    hide('pin-gate');
+    initDashboard();
+  } else {
+    document.getElementById('pin-error').classList.remove('hidden');
+    document.getElementById('pin-input').value = '';
+  }
+}
+
+// Auto-unlock if already authenticated this session
+if (sessionStorage.getItem('tos_auth') === '1') {
+  document.getElementById('pin-gate').style.display = 'none';
+  document.getElementById('dashboard').classList.remove('hidden');
+  window.addEventListener('DOMContentLoaded', initDashboard);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUPABASE REST API  (no SDK needed — plain fetch)
+// ═══════════════════════════════════════════════════════════════════
+async function query(table, params) {
+  const url = `${CFG.SUPABASE_URL}/rest/v1/${table}?${params}`;
+  const res  = await fetch(url, {
+    headers: {
+      'apikey'        : CFG.SUPABASE_KEY,
+      'Authorization' : `Bearer ${CFG.SUPABASE_KEY}`,
+      'Accept'        : 'application/json',
+    }
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`${res.status} — ${msg}`);
+  }
+  return res.json();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FETCH ALL DATA
+// ═══════════════════════════════════════════════════════════════════
+async function fetchAll() {
+  if (S.loading) return;
+  S.loading = true;
+  spinning(true);
+  hideError();
+
+  try {
+    const [starred, approved, placed, pending, tradeLog] = await Promise.all([
+      query('trade_candidates', 'status=eq.starred&order=scan_time.desc&limit=100'),
+      query('trade_candidates', 'status=eq.approved&order=scan_time.desc&limit=100'),
+      query('trade_candidates', 'status=eq.placed&order=scan_time.desc&limit=100'),
+      query('trade_candidates', 'status=eq.pending&order=scan_time.desc&limit=100'),
+      query('trade_log',        'order=trade_date.desc&limit=500'),
+    ]);
+
+    S.cands    = { starred, approved, placed, pending };
+    S.tradeLog = tradeLog;
+
+    updateCards();
+    renderTab();
+    document.getElementById('last-updated').textContent =
+      new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    document.getElementById('countdown-badge').classList.remove('hidden');
+
+  } catch (err) {
+    showError('⚠️ Could not load data: ' + err.message +
+      ' — Check Supabase connection or RLS policies.');
+    console.error(err);
+  } finally {
+    S.loading = false;
+    spinning(false);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUMMARY CARDS
+// ═══════════════════════════════════════════════════════════════════
+function updateCards() {
+  setText('stat-starred',  S.cands.starred.length);
+  setText('stat-approved', S.cands.approved.length);
+  const open = S.tradeLog.filter(t => !t.exit_date && !t.close_date && t.exit_price == null);
+  setText('stat-open',     open.length);
+  setText('stat-trades',   S.tradeLog.length);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB NAVIGATION
+// ═══════════════════════════════════════════════════════════════════
+function setTab(tab) {
+  S.tab = tab;
+  ['candidates','positions','history','performance','scans'].forEach(t => {
+    document.getElementById('content-' + t).classList.toggle('hidden', t !== tab);
+    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+  });
+  renderTab();
+}
+
+function setCandidateFilter(f) {
+  S.subTab = f;
+  ['starred','approved','placed','pending'].forEach(s =>
+    document.getElementById('sub-' + s).classList.toggle('active', s === f)
+  );
+  renderCandidates();
+}
+
+function renderTab() {
+  if      (S.tab === 'candidates')  renderCandidates();
+  else if (S.tab === 'positions')   renderPositions();
+  else if (S.tab === 'history')     renderHistory();
+  else if (S.tab === 'performance') renderPerformance();
+  else if (S.tab === 'scans')       loadAndRenderScans();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER: CANDIDATES
+// ═══════════════════════════════════════════════════════════════════
+function renderCandidates() {
+  const rows = S.cands[S.subTab] || [];
+  const el   = document.getElementById('candidates-wrap');
+
+  if (!rows.length) {
+    el.innerHTML = empty(`No ${S.subTab} candidates`);
+    return;
+  }
+
+  const tbody = rows.map((r, i) => `
+    <tr>
+      <td class="text-gray-500 text-xs">${i+1}</td>
+      <td class="font-semibold text-white">${r.ticker || '—'}</td>
+      <td>${stratBadge(r.strategy)}</td>
+      <td class="font-mono text-gray-200">$${fmt(r.strike, 0)}</td>
+      <td class="text-gray-300 hide-sm">${r.expiry || '—'}</td>
+      <td class="font-semibold text-blue-300">${r.dte ?? '—'}</td>
+      <td class="hide-sm">${fmt(r.delta, 3)}</td>
+      <td class="text-emerald-300 font-semibold">$${fmt(r.premium)}</td>
+      <td class="${scoreClass(r.score)}">${fmt(r.score, 1)}</td>
+      <td class="hide-sm">${r.iv_rank != null ? fmt(r.iv_rank, 1)+'%' : '—'}</td>
+      <td class="text-gray-500 text-xs hide-sm">${fmtDateTime(r.scan_time)}</td>
+    </tr>`).join('');
+
+  el.innerHTML = tbl(`
+    <thead><tr>
+      <th>#</th><th>Ticker</th><th>Strategy</th><th>Strike</th>
+      <th class="hide-sm">Expiry</th><th>DTE</th><th class="hide-sm">Delta</th>
+      <th>Premium</th><th>Score</th><th class="hide-sm">IV Rank</th>
+      <th class="hide-sm">Scanned</th>
+    </tr></thead>
+    <tbody>${tbody}</tbody>`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER: OPEN POSITIONS
+// ═══════════════════════════════════════════════════════════════════
+function renderPositions() {
+  const open = S.tradeLog.filter(t => !t.exit_date && !t.close_date && t.exit_price == null);
+  const el   = document.getElementById('positions-wrap');
+
+  if (!open.length) {
+    el.innerHTML = empty(
+      'No open positions yet.<br>' +
+      '<span class="text-xs">Positions appear here after you use the Telegram <code>/placed</code> command.</span>'
+    );
+    return;
+  }
+
+  const tbody = open.map((t, i) => `
+    <tr>
+      <td class="text-gray-500 text-xs">${i+1}</td>
+      <td class="font-semibold text-white">${t.ticker || '—'}</td>
+      <td>${stratBadge(t.strategy)}</td>
+      <td class="font-mono text-gray-200">$${fmt(t.strike, 0)}</td>
+      <td class="hide-sm">${t.expiry || '—'}</td>
+      <td>${fmtDateShort(t.trade_date)}</td>
+      <td class="hide-sm">${t.dte_at_entry ?? '—'}</td>
+      <td class="text-emerald-300">$${fmt(t.entry_price)}</td>
+      <td>${t.contracts ?? 1}</td>
+      <td class="text-purple-300 font-semibold">$${fmt(t.net_premium)}</td>
+      <td class="hide-sm">${fmt(t.entry_delta, 3)}</td>
+      <td class="hide-sm">${t.iv_percentile != null ? fmt(t.iv_percentile,1)+'%' : '—'}</td>
+    </tr>`).join('');
+
+  el.innerHTML = tbl(`
+    <thead><tr>
+      <th>#</th><th>Ticker</th><th>Strategy</th><th>Strike</th>
+      <th class="hide-sm">Expiry</th><th>Entry Date</th><th class="hide-sm">DTE</th>
+      <th>Entry $</th><th>Contracts</th><th>Net Premium</th>
+      <th class="hide-sm">Δ Delta</th><th class="hide-sm">IV%</th>
+    </tr></thead>
+    <tbody>${tbody}</tbody>`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER: TRADE HISTORY
+// ═══════════════════════════════════════════════════════════════════
+function renderHistory() {
+  const el = document.getElementById('history-wrap');
+
+  if (!S.tradeLog.length) {
+    el.innerHTML = empty(
+      'No trade history yet.<br>' +
+      '<span class="text-xs">Trades appear here after you use <code>/placed</code> in Telegram.</span>'
+    );
+    return;
+  }
+
+  const tbody = S.tradeLog.map((t, i) => {
+    const exitDate = t.exit_date || t.close_date;
+    const pnl      = t.pnl ?? t.net_pnl ?? t.profit_loss ?? t.realized_pnl;
+    const status   = exitDate
+      ? `<span class="badge badge-closed">CLOSED</span>`
+      : `<span class="badge badge-open">OPEN</span>`;
+    return `
+      <tr>
+        <td class="text-gray-500 text-xs">${i+1}</td>
+        <td class="font-semibold text-white">${t.ticker||'—'}</td>
+        <td>${stratBadge(t.strategy)}</td>
+        <td class="font-mono text-gray-200">$${fmt(t.strike,0)}</td>
+        <td class="hide-sm">${t.expiry||'—'}</td>
+        <td>${fmtDateShort(t.trade_date)}</td>
+        <td class="hide-sm">${fmtDateShort(exitDate)}</td>
+        <td class="text-emerald-300">$${fmt(t.entry_price)}</td>
+        <td class="text-purple-300">$${fmt(t.net_premium)}</td>
+        <td>${pnl != null ? pnlHtml(pnl) : '—'}</td>
+        <td>${status}</td>
+      </tr>`;
+  }).join('');
+
+  el.innerHTML = tbl(`
+    <thead><tr>
+      <th>#</th><th>Ticker</th><th>Strategy</th><th>Strike</th>
+      <th class="hide-sm">Expiry</th><th>Entry</th><th class="hide-sm">Exit</th>
+      <th>Entry $</th><th>Net Prem</th><th>PnL</th><th>Status</th>
+    </tr></thead>
+    <tbody>${tbody}</tbody>`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER: PERFORMANCE
+// ═══════════════════════════════════════════════════════════════════
+function renderPerformance() {
+  const el     = document.getElementById('performance-wrap');
+  const trades = S.tradeLog;
+
+  const closed  = trades.filter(t => t.exit_date || t.close_date ||
+    (t.pnl ?? t.net_pnl ?? t.profit_loss) != null);
+  const wins    = closed.filter(t => ((t.pnl ?? t.net_pnl ?? t.profit_loss) || 0) > 0);
+  const totalPnl = closed.reduce((s,t) => s + Number(t.pnl ?? t.net_pnl ?? t.profit_loss ?? 0), 0);
+  const winRate  = closed.length ? ((wins.length/closed.length)*100).toFixed(1) : null;
+  const avgPrem  = trades.length
+    ? (trades.reduce((s,t) => s + Number(t.net_premium||0), 0) / trades.length).toFixed(2)
+    : null;
+  const ccCount  = trades.filter(t => (t.strategy||'').toUpperCase().includes('CC')).length;
+  const cspCount = trades.filter(t => (t.strategy||'').toUpperCase().includes('CSP')).length;
+  const openCount = trades.filter(t => !t.exit_date && !t.close_date && t.exit_price == null).length;
+
+  const winAmts  = wins.map(t => Number(t.pnl ?? t.net_pnl ?? t.profit_loss));
+  const lossRows = closed.filter(t => ((t.pnl ?? t.net_pnl ?? t.profit_loss)||0) <= 0);
+  const lossAmts = lossRows.map(t => Number(t.pnl ?? t.net_pnl ?? t.profit_loss));
+  const avgWin  = winAmts.length ? (winAmts.reduce((s,v)=>s+v,0)/winAmts.length).toFixed(2) : null;
+  const avgLoss = lossAmts.length ? (lossAmts.reduce((s,v)=>s+v,0)/lossAmts.length).toFixed(2) : null;
+
+  const na = '<span class="text-gray-600">—</span>';
+
+  el.innerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div class="bg-gray-800/50 rounded-xl p-4 border border-gray-700/40">
+        <p class="text-xs text-gray-500 mb-1">Total Trades</p>
+        <p class="text-3xl font-bold text-white">${trades.length}</p>
+        <p class="text-xs text-gray-600 mt-1">${ccCount} CC · ${cspCount} CSP · ${openCount} open</p>
+      </div>
+      <div class="bg-gray-800/50 rounded-xl p-4 border border-gray-700/40">
+        <p class="text-xs text-gray-500 mb-1">Win Rate</p>
+        <p class="text-3xl font-bold ${winRate ? (winRate>=70?'text-emerald-400':'text-amber-400') : 'text-gray-600'}">
+          ${winRate ? winRate+'%' : na}
+        </p>
+        <p class="text-xs text-gray-600 mt-1">${wins.length}W / ${closed.length-wins.length}L (${closed.length} closed)</p>
+      </div>
+      <div class="bg-gray-800/50 rounded-xl p-4 border border-gray-700/40">
+        <p class="text-xs text-gray-500 mb-1">Total PnL</p>
+        <p class="text-3xl font-bold ${closed.length ? (totalPnl>=0?'text-emerald-400':'text-red-400') : 'text-gray-600'}">
+          ${closed.length ? (totalPnl>=0?'+':'')+'\$'+Math.abs(totalPnl).toFixed(0) : na}
+        </p>
+        <p class="text-xs text-gray-600 mt-1">from ${closed.length} closed trades</p>
+      </div>
+      <div class="bg-gray-800/50 rounded-xl p-4 border border-gray-700/40">
+        <p class="text-xs text-gray-500 mb-1">Avg Net Premium</p>
+        <p class="text-3xl font-bold text-purple-400">${avgPrem ? '\$'+avgPrem : na}</p>
+        <p class="text-xs text-gray-600 mt-1">per contract placed</p>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+      <div class="bg-gray-800/30 rounded-xl p-4 border border-gray-700/30">
+        <p class="text-sm font-semibold text-gray-300 mb-3">📊 Win / Loss Analysis</p>
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-gray-500">Avg Win</span>
+            <span class="text-emerald-400 font-semibold">${avgWin ? '+\$'+avgWin : na}</span></div>
+          <div class="flex justify-between"><span class="text-gray-500">Avg Loss</span>
+            <span class="text-red-400 font-semibold">${avgLoss ? '\$'+Number(avgLoss).toFixed(2) : na}</span></div>
+          <div class="flex justify-between"><span class="text-gray-500">Win/Loss Ratio</span>
+            <span class="text-gray-300 font-semibold">${(avgWin && avgLoss && avgLoss!='0.00') ? (Math.abs(avgWin/avgLoss)).toFixed(2)+'×' : na}</span></div>
+          <div class="flex justify-between"><span class="text-gray-500">Open Positions</span>
+            <span class="text-blue-400 font-semibold">${openCount}</span></div>
+        </div>
+      </div>
+      <div class="bg-gray-800/30 rounded-xl p-4 border border-gray-700/30">
+        <p class="text-sm font-semibold text-gray-300 mb-3">🎯 Strategy Split</p>
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-gray-500">Covered Calls</span>
+            <span class="text-blue-300 font-semibold">${ccCount} trades</span></div>
+          <div class="flex justify-between"><span class="text-gray-500">Cash-Secured Puts</span>
+            <span class="text-purple-300 font-semibold">${cspCount} trades</span></div>
+          <div class="flex justify-between"><span class="text-gray-500">Candidates (starred)</span>
+            <span class="text-amber-300 font-semibold">${S.cands.starred.length}</span></div>
+          <div class="flex justify-between"><span class="text-gray-500">Candidates (approved)</span>
+            <span class="text-emerald-300 font-semibold">${S.cands.approved.length}</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-gray-800/30 rounded-xl p-4 border border-gray-700/30 mb-4">
+      <p class="text-sm font-semibold text-gray-300 mb-3">📋 Entry Rules (checklist before every trade)</p>
+      <div class="grid sm:grid-cols-2 gap-y-1.5 gap-x-6 text-xs text-gray-400">
+        <div>☑ IV Rank &gt;30 OR absolute IV &gt;35%</div>
+        <div>☑ Capital at risk ≤5% of portfolio</div>
+        <div>☑ Not within 5 days of TSLA earnings</div>
+        <div>☑ TSLA total exposure ≤15%</div>
+        <div>☑ VIX not extreme fear (&gt;40)</div>
+        <div>☑ Portfolio heat ≤40%</div>
+        <div>☑ CC: income layer only — max 2 contracts</div>
+        <div>☑ CSP: cash covers full assignment — max 1</div>
+      </div>
+    </div>
+    <div class="bg-gray-800/30 rounded-xl p-4 border border-gray-700/30">
+      <p class="text-sm font-semibold text-gray-300 mb-3">⚡ Position Management</p>
+      <div class="grid sm:grid-cols-2 gap-4 text-xs">
+        <div>
+          <p class="text-red-400 font-semibold mb-1.5">🛑 Stop Loss — close immediately</p>
+          <p class="text-gray-400 mb-0.5">• Unrealized loss ≥ 1× entry premium</p>
+          <p class="text-gray-400 mb-0.5">• Delta &gt; 0.50</p>
+          <p class="text-gray-400 mb-0.5">• TSLA adverse move &gt;8%</p>
+          <p class="text-gray-400">• No averaging down. Ever.</p>
+        </div>
+        <div>
+          <p class="text-emerald-400 font-semibold mb-1.5">✅ Take Profit — close early</p>
+          <p class="text-gray-400 mb-0.5">• Premium ≥80% captured AND DTE &gt;15 (preferred)</p>
+          <p class="text-gray-400 mb-0.5">• Premium ≥75% captured at any time</p>
+          <p class="text-gray-400 mb-0.5">• IV crush event</p>
+          <p class="text-gray-400">• Market shifts against thesis</p>
+        </div>
+      </div>
+    </div>
+    ${trades.length === 0 ? `
+    <div class="mt-4 p-3 bg-amber-900/20 border border-amber-800/40 rounded-lg text-amber-300 text-xs">
+      ℹ️ Trade history is empty. Historical trades from Lovable can be imported using the
+      <code>migrate_lovable_trades.py</code> script in the optionbot folder.
+    </div>` : ''}
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SCAN HISTORY — fetch, render, expand, CSV, PDF
+// ═══════════════════════════════════════════════════════════════════
+
+async function loadAndRenderScans() {
+  if (!S.scanHistLoaded) {
+    document.getElementById('scans-wrap').innerHTML =
+      '<div class="text-gray-500 text-sm text-center py-10">Loading scan history…</div>';
+    try {
+      S.scanHistory = await query('scan_history',
+        'order=scan_time.desc&limit=200');
+      S.scanHistLoaded = true;
+    } catch (err) {
+      document.getElementById('scans-wrap').innerHTML =
+        `<div class="text-red-400 text-sm text-center py-10">Failed to load: ${err.message}</div>`;
+      return;
+    }
+  }
+  renderScanHistory();
+}
+
+function renderScanHistory() {
+  const el = document.getElementById('scans-wrap');
+  const rows = S.scanHistory;
+
+  const nSel = S.scanHistSel.size;
+  const btnDisabled = nSel === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-600 cursor-pointer';
+
+  // Header bar
+  let html = `
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-semibold text-gray-300">🗂️ Scan History</span>
+        <span class="text-xs text-gray-600">(${rows.length} scans)</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="refreshScanHistory()"
+          class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs text-gray-300 transition-colors">
+          ↻ Refresh
+        </button>
+        <button onclick="scanHistDownloadCSV()" ${nSel===0?'disabled':''}
+          class="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 transition-colors ${btnDisabled}">
+          ⬇ CSV${nSel>0?' ('+nSel+')':''}
+        </button>
+        <button onclick="scanHistPrintPDF()" ${nSel===0?'disabled':''}
+          class="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 transition-colors ${btnDisabled}">
+          🖨 PDF${nSel>0?' ('+nSel+')':''}
+        </button>
+      </div>
+    </div>`;
+
+  if (!rows.length) {
+    html += empty('No scan history yet. Run a scan to see records here.');
+    el.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="overflow-x-auto"><table>
+    <thead><tr>
+      <th style="width:32px"><input type="checkbox" id="sh-check-all" onchange="scanHistToggleAll(this.checked)"
+        style="accent-color:#10b981; cursor:pointer;"></th>
+      <th>#</th><th>Date</th><th>Time</th><th class="hide-sm">Slot</th>
+      <th>Tickers</th><th>Strategy</th><th>Results</th>
+      <th class="hide-sm">Duration</th><th></th>
+    </tr></thead><tbody>`;
+
+  rows.forEach((r, i) => {
+    const isExp = S.scanHistExpand.has(r.id);
+    const isSel = S.scanHistSel.has(r.id);
+    const dt    = r.scan_time ? new Date(r.scan_time) : null;
+    const date  = dt ? dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+    const time  = dt ? dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}) : '—';
+    const tickers = Array.isArray(r.tickers) ? r.tickers.join(', ') : (r.tickers||'—');
+    const strat   = (r.strategy||'both').toUpperCase();
+    const stratCls = strat==='CC'?'badge-cc': strat==='CSP'?'badge-csp':'badge-pending';
+    const dur = r.elapsed_secs != null ? r.elapsed_secs+'s' : '—';
+
+    html += `<tr style="cursor:default">
+      <td><input type="checkbox" onchange="scanHistToggle('${r.id}',this.checked)"
+        ${isSel?'checked':''} style="accent-color:#10b981; cursor:pointer;"></td>
+      <td class="text-gray-500 text-xs">${i+1}</td>
+      <td class="text-gray-300 text-xs">${date}</td>
+      <td class="font-mono text-gray-400 text-xs">${time}</td>
+      <td class="text-gray-500 text-xs hide-sm">${r.slot_label||'Manual'}</td>
+      <td class="font-semibold text-white text-sm">${tickers}</td>
+      <td><span class="badge ${stratCls}">${strat}</span></td>
+      <td class="text-emerald-400 font-semibold">${r.result_count??0}</td>
+      <td class="text-gray-500 text-xs hide-sm">${dur}</td>
+      <td><button onclick="scanHistToggleExpand('${r.id}')"
+        class="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
+        title="Expand details">${isExp?'▲ Hide':'▼ Detail'}</button></td>
+    </tr>`;
+
+    if (isExp) {
+      html += scanHistExpandRow(r);
+    }
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+function scanHistExpandRow(r) {
+  const cfg = r.config || {};
+  const wts = r.score_weights || {};
+  const res = Array.isArray(r.results) ? r.results : [];
+
+  const cfgRows = [
+    ['Strategy', cfg.strategy||'—'],
+    ['Min IV', cfg.min_iv!=null ? (cfg.min_iv*100).toFixed(0)+'%' : '—'],
+    ['Min IV Rank', cfg.min_iv_rank!=null ? cfg.min_iv_rank : '—'],
+    ['Min Premium', cfg.min_premium!=null ? '$'+cfg.min_premium : '—'],
+    ['Min Theta', cfg.min_theta!=null ? cfg.min_theta : '—'],
+    ['Max Spread %', cfg.max_bid_ask_spread_pct!=null ? cfg.max_bid_ask_spread_pct : '—'],
+    ['Max DTE', cfg.max_dte!=null ? cfg.max_dte : '—'],
+    ['Strike Range', cfg.strike_range_pct!=null ? (cfg.strike_range_pct*100).toFixed(0)+'%' : '—'],
+    ['Autostar ≥', cfg.autostar_threshold!=null ? cfg.autostar_threshold : '—'],
+  ].map(([k,v]) => `<div class="flex justify-between text-xs py-0.5 border-b border-gray-800">
+    <span class="text-gray-500">${k}</span><span class="text-gray-300">${v}</span></div>`).join('');
+
+  const wgtRows = [
+    ['Ann. Return', wts.weight_ann_return!=null ? (wts.weight_ann_return*100).toFixed(0)+'%' : '—'],
+    ['IV',          wts.weight_iv!=null          ? (wts.weight_iv*100).toFixed(0)+'%'          : '—'],
+    ['Theta Yield', wts.weight_theta_yield!=null ? (wts.weight_theta_yield*100).toFixed(0)+'%' : '—'],
+    ['Delta Safety',wts.weight_delta_safety!=null? (wts.weight_delta_safety*100).toFixed(0)+'%': '—'],
+    ['Liquidity',   wts.weight_liquidity!=null   ? (wts.weight_liquidity*100).toFixed(0)+'%'   : '—'],
+  ].map(([k,v]) => `<div class="flex justify-between text-xs py-0.5 border-b border-gray-800">
+    <span class="text-gray-500">${k}</span><span class="text-emerald-400 font-semibold">${v}</span></div>`).join('');
+
+  let resTable = '';
+  if (res.length) {
+    const resRows = res.map((x, i) => `<tr>
+      <td class="text-gray-600 text-xs">${x.rank??i+1}</td>
+      <td class="font-semibold text-white text-xs">${x.ticker||'—'}</td>
+      <td>${stratBadge(x.strategy||'')}</td>
+      <td class="font-mono text-xs">$${fmt(x.strike,0)}</td>
+      <td class="text-gray-400 text-xs">${x.expiry||'—'}</td>
+      <td class="text-blue-300 text-xs">${x.dte??'—'}</td>
+      <td class="text-xs">${fmt(x.delta,3)}</td>
+      <td class="text-emerald-300 text-xs">$${fmt(x.premium)}</td>
+      <td class="text-xs">${x.iv!=null?(x.iv*100).toFixed(0)+'%':'—'}</td>
+      <td class="${scoreClass(x.score)} text-xs">${fmt(x.score,1)}</td>
+    </tr>`).join('');
+    resTable = `<div class="mt-3 overflow-x-auto">
+      <p class="text-xs text-gray-500 mb-1">Results (${res.length})</p>
+      <table style="font-size:0.78rem"><thead><tr>
+        <th>#</th><th>Ticker</th><th>Strat</th><th>Strike</th>
+        <th>Expiry</th><th>DTE</th><th>Δ</th><th>Prem</th><th>IV</th><th>Score</th>
+      </tr></thead><tbody>${resRows}</tbody></table></div>`;
+  } else {
+    resTable = '<p class="text-xs text-gray-600 mt-2">No results passed filters in this scan.</p>';
+  }
+
+  return `<tr><td colspan="10" style="padding:0">
+    <div class="bg-gray-900/60 border-t border-b border-gray-800 px-4 py-3 mx-0">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+        <div>
+          <p class="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Scan Config</p>
+          ${cfgRows}
+        </div>
+        <div>
+          <p class="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Score Weights</p>
+          ${wgtRows}
+        </div>
+      </div>
+      ${resTable}
+    </div>
+  </td></tr>`;
+}
+
+function scanHistToggle(id, checked) {
+  if (checked) S.scanHistSel.add(id);
+  else         S.scanHistSel.delete(id);
+  renderScanHistory();
+}
+
+function scanHistToggleAll(checked) {
+  if (checked) S.scanHistory.forEach(r => S.scanHistSel.add(r.id));
+  else         S.scanHistSel.clear();
+  renderScanHistory();
+}
+
+function scanHistToggleExpand(id) {
+  if (S.scanHistExpand.has(id)) S.scanHistExpand.delete(id);
+  else                          S.scanHistExpand.add(id);
+  renderScanHistory();
+}
+
+function refreshScanHistory() {
+  S.scanHistLoaded = false;
+  loadAndRenderScans();
+}
+
+function scanHistGetSelected() {
+  return S.scanHistory.filter(r => S.scanHistSel.has(r.id));
+}
+
+function scanHistDownloadCSV() {
+  const selected = scanHistGetSelected();
+  if (!selected.length) return;
+
+  const header = ['scan_date','scan_time','slot','tickers','strategy','result_count','elapsed_secs',
+    'min_iv','min_iv_rank','min_premium','min_theta','max_spread_pct','max_dte','strike_range_pct','autostar_threshold',
+    'w_ann_return','w_iv','w_theta','w_delta','w_liquidity',
+    'rank','res_ticker','res_strategy','res_strike','res_expiry','res_dte',
+    'res_delta','res_premium','res_iv','res_ann_return','res_score'];
+
+  const csvRows = [header.join(',')];
+
+  selected.forEach(r => {
+    const dt  = r.scan_time ? new Date(r.scan_time) : null;
+    const d   = dt ? dt.toLocaleDateString('en-CA') : '';
+    const t   = dt ? dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+    const tks = Array.isArray(r.tickers) ? r.tickers.join('|') : (r.tickers||'');
+    const cfg = r.config || {};
+    const wts = r.score_weights || {};
+    const res = Array.isArray(r.results) && r.results.length ? r.results : [{}];
+
+    res.forEach((x, i) => {
+      csvRows.push([
+        d, t, r.slot_label||'Manual', tks, r.strategy||'both',
+        r.result_count??0, r.elapsed_secs??'',
+        cfg.min_iv!=null?(cfg.min_iv*100).toFixed(1):'',
+        cfg.min_iv_rank??'', cfg.min_premium??'', cfg.min_theta??'',
+        cfg.max_bid_ask_spread_pct??'', cfg.max_dte??'',
+        cfg.strike_range_pct!=null?(cfg.strike_range_pct*100).toFixed(0):'',
+        cfg.autostar_threshold??'',
+        wts.weight_ann_return!=null?(wts.weight_ann_return*100).toFixed(0):'',
+        wts.weight_iv!=null?(wts.weight_iv*100).toFixed(0):'',
+        wts.weight_theta_yield!=null?(wts.weight_theta_yield*100).toFixed(0):'',
+        wts.weight_delta_safety!=null?(wts.weight_delta_safety*100).toFixed(0):'',
+        wts.weight_liquidity!=null?(wts.weight_liquidity*100).toFixed(0):'',
+        Object.keys(x).length ? (x.rank??i+1) : '', x.ticker||'', x.strategy||'',
+        x.strike??'', x.expiry||'', x.dte??'',
+        x.delta!=null?Number(x.delta).toFixed(3):'',
+        x.premium!=null?Number(x.premium).toFixed(2):'',
+        x.iv!=null?(x.iv*100).toFixed(1):'',
+        x.ann_return!=null?Number(x.ann_return).toFixed(1):'',
+        x.score!=null?Number(x.score).toFixed(1):'',
+      ].map(v => `"${v}"`).join(','));
+    });
+  });
+
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `scan_history_${new Date().toLocaleDateString('en-CA')}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function scanHistPrintPDF() {
+  const selected = scanHistGetSelected();
+  if (!selected.length) return;
+
+  let body = `<html><head><title>Scan History</title><style>
+    body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:20px}
+    h1{font-size:16px;margin-bottom:4px} h2{font-size:13px;margin:12px 0 4px;color:#333}
+    table{width:100%;border-collapse:collapse;margin-bottom:8px}
+    th{background:#f3f4f6;text-align:left;padding:4px 6px;font-size:10px;border:1px solid #ddd}
+    td{padding:4px 6px;border:1px solid #e5e7eb;font-size:10px}
+    .meta{color:#555;font-size:10px;margin-bottom:8px}
+    .section{margin-bottom:16px;page-break-inside:avoid}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media print{.no-print{display:none}}
+  </style></head><body>
+  <h1>🤖 Ken's Trading OS — Scan History</h1>
+  <p class="meta">Generated: ${new Date().toLocaleString()} · ${selected.length} scan(s) selected</p>`;
+
+  selected.forEach((r, idx) => {
+    const dt    = r.scan_time ? new Date(r.scan_time) : null;
+    const dtStr = dt ? dt.toLocaleString() : '—';
+    const tks   = Array.isArray(r.tickers) ? r.tickers.join(', ') : (r.tickers||'—');
+    const cfg   = r.config || {};
+    const wts   = r.score_weights || {};
+    const res   = Array.isArray(r.results) ? r.results : [];
+
+    body += `<div class="section">
+      <h2>Scan #${idx+1} — ${dtStr}</h2>
+      <p class="meta">Tickers: <b>${tks}</b> · Strategy: <b>${(r.strategy||'both').toUpperCase()}</b>
+        · Results: <b>${r.result_count??0}</b> · Duration: ${r.elapsed_secs!=null?r.elapsed_secs+'s':'—'}
+        · Slot: ${r.slot_label||'Manual'}</p>
+      <div class="grid">
+        <div>
+          <b>Scan Config</b>
+          <table><tr><th>Param</th><th>Value</th></tr>
+            <tr><td>Min IV</td><td>${cfg.min_iv!=null?(cfg.min_iv*100).toFixed(0)+'%':'—'}</td></tr>
+            <tr><td>Min IV Rank</td><td>${cfg.min_iv_rank??'—'}</td></tr>
+            <tr><td>Min Premium</td><td>${cfg.min_premium!=null?'$'+cfg.min_premium:'—'}</td></tr>
+            <tr><td>Min Theta</td><td>${cfg.min_theta??'—'}</td></tr>
+            <tr><td>Max Spread %</td><td>${cfg.max_bid_ask_spread_pct??'—'}</td></tr>
+            <tr><td>Max DTE</td><td>${cfg.max_dte??'—'}</td></tr>
+            <tr><td>Strike Range</td><td>${cfg.strike_range_pct!=null?(cfg.strike_range_pct*100).toFixed(0)+'%':'—'}</td></tr>
+            <tr><td>Autostar ≥</td><td>${cfg.autostar_threshold??'—'}</td></tr>
+          </table>
+        </div>
+        <div>
+          <b>Score Weights</b>
+          <table><tr><th>Factor</th><th>Weight</th></tr>
+            <tr><td>Ann. Return</td><td>${wts.weight_ann_return!=null?(wts.weight_ann_return*100).toFixed(0)+'%':'—'}</td></tr>
+            <tr><td>IV</td><td>${wts.weight_iv!=null?(wts.weight_iv*100).toFixed(0)+'%':'—'}</td></tr>
+            <tr><td>Theta Yield</td><td>${wts.weight_theta_yield!=null?(wts.weight_theta_yield*100).toFixed(0)+'%':'—'}</td></tr>
+            <tr><td>Delta Safety</td><td>${wts.weight_delta_safety!=null?(wts.weight_delta_safety*100).toFixed(0)+'%':'—'}</td></tr>
+            <tr><td>Liquidity</td><td>${wts.weight_liquidity!=null?(wts.weight_liquidity*100).toFixed(0)+'%':'—'}</td></tr>
+          </table>
+        </div>
+      </div>`;
+
+    if (res.length) {
+      body += `<b>Results (${res.length})</b>
+        <table><tr><th>#</th><th>Ticker</th><th>Strategy</th><th>Strike</th>
+          <th>Expiry</th><th>DTE</th><th>Delta</th><th>Premium</th><th>IV</th><th>Score</th></tr>
+        ${res.map((x, i) => `<tr>
+          <td>${x.rank??i+1}</td><td>${x.ticker||'—'}</td>
+          <td>${(x.strategy||'').toUpperCase()}</td>
+          <td>$${x.strike!=null?Number(x.strike).toFixed(0):'—'}</td>
+          <td>${x.expiry||'—'}</td><td>${x.dte??'—'}</td>
+          <td>${x.delta!=null?Number(x.delta).toFixed(3):'—'}</td>
+          <td>$${x.premium!=null?Number(x.premium).toFixed(2):'—'}</td>
+          <td>${x.iv!=null?(x.iv*100).toFixed(0)+'%':'—'}</td>
+          <td><b>${x.score!=null?Number(x.score).toFixed(1):'—'}</b></td>
+        </tr>`).join('')}
+        </table>`;
+    } else {
+      body += '<p><i>No results passed filters in this scan.</i></p>';
+    }
+    body += '</div>';
+  });
+
+  body += '</body></html>';
+  const w = window.open('', '_blank');
+  w.document.write(body);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 600);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function stratBadge(s) {
+  const str = (s||'').toUpperCase();
+  const isCall = str.includes('CALL') || str.includes('CC');
+  const cls = isCall ? 'badge-cc' : 'badge-csp';
+  const lbl = isCall ? 'CALL' : 'PUT';
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+
+function scoreClass(score) {
+  if (score == null) return 'text-gray-500';
+  return score >= 80 ? 'score-high' : score >= 60 ? 'score-mid' : 'score-low';
+}
+
+function pnlHtml(pnl) {
+  const n   = Number(pnl);
+  const cls = n >= 0 ? 'pnl-pos' : 'pnl-neg';
+  const sgn = n >= 0 ? '+' : '';
+  return `<span class="${cls}">${sgn}$${Math.abs(n).toFixed(2)}</span>`;
+}
+
+function fmt(v, dec=2) {
+  if (v == null) return '—';
+  return Number(v).toFixed(dec);
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' +
+           d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
+  } catch { return iso; }
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  } catch { return iso; }
+}
+
+function tbl(inner) {
+  return `<div class="overflow-x-auto"><table>${inner}</table></div>`;
+}
+
+function empty(msg) {
+  return `<div class="text-center text-gray-500 py-12 text-sm">${msg}</div>`;
+}
+
+function show(id) { document.getElementById(id).classList.remove('hidden'); }
+function hide(id) { document.getElementById(id).classList.add('hidden'); }
+function setText(id, val) { document.getElementById(id).textContent = val; }
+
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError() {
+  document.getElementById('error-banner').classList.add('hidden');
+}
+
+function spinning(on) {
+  document.getElementById('refresh-icon').classList.toggle('spin', on);
+  document.getElementById('refresh-btn').disabled = on;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUTO-REFRESH COUNTDOWN
+// ═══════════════════════════════════════════════════════════════════
+let _cd = CFG.REFRESH_SECS;
+
+function refreshAll() {
+  _cd = CFG.REFRESH_SECS;
+  fetchAll();
+}
+
+function startCountdown() {
+  setInterval(() => {
+    _cd--;
+    const el = document.getElementById('countdown');
+    if (el) el.textContent = _cd;
+    if (_cd <= 0) { _cd = CFG.REFRESH_SECS; fetchAll(); }
+  }, 1000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+function initDashboard() {
+  fetchAll();
+  startCountdown();
+}
+</script>
+
+</body>
+</html>

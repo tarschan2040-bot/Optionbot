@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OptionBot System Connection Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 20px; }
+  h1 { text-align: center; font-size: 1.6rem; color: #38bdf8; margin-bottom: 8px; }
+  .subtitle { text-align: center; color: #94a3b8; font-size: 0.85rem; margin-bottom: 24px; }
+
+  .map-container { max-width: 1100px; margin: 0 auto; position: relative; }
+
+  /* Node styles */
+  .node {
+    border-radius: 12px;
+    padding: 14px 16px;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    transition: transform 0.15s;
+  }
+  .node:hover { transform: translateY(-2px); }
+  .node h3 { font-size: 0.95rem; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .node .meta { font-size: 0.72rem; color: #94a3b8; line-height: 1.5; }
+  .node .meta b { color: #cbd5e1; }
+  .node .tag { display: inline-block; font-size: 0.62rem; padding: 2px 6px; border-radius: 4px; margin-top: 4px; margin-right: 4px; }
+
+  /* Color themes per category */
+  .cat-control { background: linear-gradient(135deg, #1e3a5f, #172554); border: 1px solid #1d4ed8; }
+  .cat-control h3 { color: #60a5fa; }
+  .cat-brain  { background: linear-gradient(135deg, #3b1f5e, #2e1065); border: 1px solid #7c3aed; }
+  .cat-brain h3 { color: #a78bfa; }
+  .cat-data   { background: linear-gradient(135deg, #14412a, #052e16); border: 1px solid #16a34a; }
+  .cat-data h3 { color: #4ade80; }
+  .cat-broker { background: linear-gradient(135deg, #5c2d0e, #431407); border: 1px solid #ea580c; }
+  .cat-broker h3 { color: #fb923c; }
+  .cat-output { background: linear-gradient(135deg, #4a1d32, #4c0519); border: 1px solid #e11d48; }
+  .cat-output h3 { color: #fb7185; }
+  .cat-ext    { background: linear-gradient(135deg, #1e3a4c, #083344); border: 1px solid #0891b2; }
+  .cat-ext h3 { color: #22d3ee; }
+
+  .tag-file   { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+  .tag-api    { background: #312e81; color: #a5b4fc; border: 1px solid #4338ca; }
+  .tag-port   { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
+
+  /* Grid layout */
+  .grid { display: grid; gap: 16px; }
+  .row1 { grid-template-columns: 1fr 1fr 1fr; margin-bottom: 16px; }
+  .row2 { grid-template-columns: 1fr 2fr; margin-bottom: 16px; }
+  .row3 { grid-template-columns: 2fr 1fr; margin-bottom: 16px; }
+  .row4 { grid-template-columns: 1fr 1fr 1fr; margin-bottom: 16px; }
+
+  /* Connection arrows */
+  .connections { margin: 20px 0; padding: 16px; background: #1e293b; border-radius: 10px; border: 1px solid #334155; }
+  .connections h2 { font-size: 1rem; color: #38bdf8; margin-bottom: 12px; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .flow-label { font-size: 0.75rem; color: #64748b; min-width: 120px; }
+  .flow-step { font-size: 0.72rem; padding: 4px 10px; border-radius: 6px; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; white-space: nowrap; }
+  .flow-arrow { color: #475569; font-size: 0.85rem; }
+
+  /* Legend */
+  .legend { margin-top: 20px; padding: 12px 16px; background: #1e293b; border-radius: 10px; border: 1px solid #334155; }
+  .legend h2 { font-size: 0.9rem; color: #38bdf8; margin-bottom: 8px; }
+  .legend-items { display: flex; flex-wrap: wrap; gap: 12px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+  @media (max-width: 768px) {
+    .row1, .row2, .row3, .row4 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>OptionBot — System Connection Map</h1>
+<p class="subtitle">All platforms, APIs, data flows & key diagnostics info | Updated 2026-03-16</p>
+
+<div class="map-container">
+
+  <!-- Row 1: Control & Interface Layer -->
+  <div class="grid row1">
+    <div class="node cat-control">
+      <h3>📱 Telegram Bot</h3>
+      <div class="meta">
+        <b>Role:</b> Primary control interface. Commands in, results out.<br>
+        <b>Protocol:</b> Bot API long-polling (getUpdates)<br>
+        <b>Auth:</b> TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID<br>
+        <b>Slash gate:</b> All commands require / prefix<br>
+        <b>Retry:</b> Markdown parse fail → auto-retry plain text
+      </div>
+      <span class="tag tag-file">output/telegram_bot.py</span>
+      <span class="tag tag-file">output/telegram_notifier.py</span>
+      <span class="tag tag-api">api.telegram.org</span>
+    </div>
+
+    <div class="node cat-control">
+      <h3>⏰ Scheduler</h3>
+      <div class="meta">
+        <b>Role:</b> Auto-scan at 3 fixed ET slots + manual scan dispatch<br>
+        <b>Slots:</b> 09:35 Open · 12:45 Midday · 15:00 Pre-Close<br>
+        <b>Loop:</b> Checks every 10s, fires once per slot per day<br>
+        <b>Threading:</b> Scan runs in daemon thread<br>
+        <b>Cancel:</b> threading.Event, checked at batch boundary
+      </div>
+      <span class="tag tag-file">scheduler.py</span>
+      <span class="tag tag-port">Main entry point</span>
+    </div>
+
+    <div class="node cat-control">
+      <h3>🖥️ Mac Mini Hub</h3>
+      <div class="meta">
+        <b>Role:</b> Always-on host for bot + TWS/IB Gateway<br>
+        <b>OS:</b> macOS<br>
+        <b>Start:</b> START_BOT.sh / START_BOT_BACKGROUND.sh<br>
+        <b>Python:</b> 3.11+<br>
+        <b>Future:</b> OpenClaw autonomous agent
+      </div>
+      <span class="tag tag-file">START_BOT.sh</span>
+      <span class="tag tag-file">START_BOT_BACKGROUND.sh</span>
+    </div>
+  </div>
+
+  <!-- Row 2: Brain Layer -->
+  <div class="grid row2">
+    <div class="node cat-brain">
+      <h3>🧠 Scanner Engine</h3>
+      <div class="meta">
+        <b>Role:</b> Orchestrate full scan pipeline<br>
+        <b>Flow:</b> Config → Fetch chain → Greeks → IV filter → Strategy filter → Score → Rank<br>
+        <b>IV filter:</b> Two layers — min_iv_rank (relative) + min_iv (absolute)<br>
+        <b>Batch:</b> 30 contracts/batch, 6s wait per batch<br>
+        <b>Output:</b> List[ScanOpportunity] sorted by score
+      </div>
+      <span class="tag tag-file">core/scanner.py</span>
+      <span class="tag tag-file">core/config.py</span>
+      <span class="tag tag-file">core/models.py</span>
+    </div>
+
+    <div class="node cat-brain">
+      <h3>📊 Scoring & Greeks</h3>
+      <div class="meta">
+        <b>Score (0-100):</b> 5 weighted factors<br>
+        &nbsp;&nbsp;Ann. Return 30% · IV 20% · Theta Yield 20% · Delta Safety 20% · Liquidity 10%<br>
+        <b>Greeks:</b> Black-Scholes (scipy.stats.norm), daily theta for sellers<br>
+        <b>IV Rank:</b> (current - 52w_low) / (52w_high - 52w_low) × 100<br>
+        <b>Risk-free rate:</b> 5.3% (review periodically)
+      </div>
+      <span class="tag tag-file">core/scorer.py</span>
+      <span class="tag tag-file">core/greeks.py</span>
+    </div>
+  </div>
+
+  <!-- Row 3: Strategy Layer -->
+  <div class="grid row3">
+    <div class="node cat-brain">
+      <h3>📋 Strategy Filters</h3>
+      <div class="meta">
+        <b>Covered Call:</b> Call options, strike > underlying, delta 0.20–0.35, OTM<br>
+        <b>Cash-Secured Put:</b> Put options, strike < underlying, delta -0.35 to -0.20, OTM<br>
+        <b>Shared filters:</b> min_theta, min_iv_rank, min_iv, max_vega, min_premium, min_ann_return<br>
+        <b>Telegram override:</b> /set strategy cc | csp | both
+      </div>
+      <span class="tag tag-file">strategies/covered_call.py</span>
+      <span class="tag tag-file">strategies/cash_secured_put.py</span>
+    </div>
+
+    <div class="node cat-brain">
+      <h3>🤖 AI Assistants</h3>
+      <div class="meta">
+        <b>Claude:</b> Anthropic API (claude-sonnet-4-6)<br>
+        <b>Llama:</b> OpenRouter API (llama-3.3-70b)<br>
+        <b>Trigger:</b> /askclaude · /askllama<br>
+        <b>System:</b> Options trading expert prompt
+      </div>
+      <span class="tag tag-api">api.anthropic.com</span>
+      <span class="tag tag-api">openrouter.ai</span>
+    </div>
+  </div>
+
+  <!-- Row 4: Data Layer -->
+  <div class="grid row4">
+    <div class="node cat-broker">
+      <h3>🏦 IBKR (TWS / IB Gateway)</h3>
+      <div class="meta">
+        <b>Role:</b> Option chain data, IV history, contract qualification<br>
+        <b>Library:</b> ib_insync (async TWS API)<br>
+        <b>Ports:</b> 7497 (TWS paper) · 4002 (Gateway paper) · 7496 · 4001<br>
+        <b>Data type:</b> Market open → Type 3 (delayed) · Closed → Type 4 (frozen)<br>
+        <b>Quirk:</b> Delayed data returns OI=0 — keep min_oi=0<br>
+        <b>Error 10197:</b> Competing sessions (phone/browser) block data
+      </div>
+      <span class="tag tag-file">data/ibkr_fetcher.py</span>
+      <span class="tag tag-port">localhost:7497/4002</span>
+    </div>
+
+    <div class="node cat-data">
+      <h3>🗄️ Supabase (PostgreSQL)</h3>
+      <div class="meta">
+        <b>Project:</b> AIBOT claude (dcmuqcunlenbvgzxgstx)<br>
+        <b>Tables:</b><br>
+        &nbsp;&nbsp;trade_candidates — scan results + workflow status<br>
+        &nbsp;&nbsp;trade_log — placed trades (open positions)<br>
+        &nbsp;&nbsp;scan_history — full scan records + config snapshots<br>
+        <b>Status flow:</b> pending → starred → approved → placed / rejected<br>
+        <b>All errors non-fatal:</b> Never blocks scan delivery
+      </div>
+      <span class="tag tag-file">data/supabase_client.py</span>
+      <span class="tag tag-api">dcmuqcunlenbvgzxgstx.supabase.co</span>
+    </div>
+
+    <div class="node cat-ext">
+      <h3>📈 Yahoo Finance</h3>
+      <div class="meta">
+        <b>Role:</b> Underlying stock prices (free, no API key)<br>
+        <b>Used by:</b> ibkr_fetcher (scan price), telegram_bot (price/movers)<br>
+        <b>Endpoint:</b> query1.finance.yahoo.com/v8/finance/chart<br>
+        <b>Assets:</b> Stocks, indices, crypto, commodities, futures<br>
+        <b>Fallback:</b> If Yahoo fails, scanner returns empty chain
+      </div>
+      <span class="tag tag-api">query1.finance.yahoo.com</span>
+    </div>
+  </div>
+
+  <!-- Row 5: Output Layer -->
+  <div class="grid row2">
+    <div class="node cat-output">
+      <h3>🌐 React Dashboard (Netlify)</h3>
+      <div class="meta">
+        <b>URL:</b> optionbot.netlify.app<br>
+        <b>Repo:</b> GitHub: tarschan2040-bot/option123kk<br>
+        <b>Pages:</b> Dashboard, Candidates, Portfolio, History, Risk, Rules, Strategy, Research, Education, Scans<br>
+        <b>Data source:</b> Reads Supabase directly (same tables)<br>
+        <b>Auth:</b> Supabase auth (protected routes)<br>
+        <b>Deploy:</b> Auto-deploy on GitHub push
+      </div>
+      <span class="tag tag-api">optionbot.netlify.app</span>
+      <span class="tag tag-port">SPA: _redirects → index.html</span>
+    </div>
+
+    <div class="node cat-ext">
+      <h3>📊 TradingView</h3>
+      <div class="meta">
+        <b>Role:</b> Charting + custom Pine Script indicators<br>
+        <b>Script:</b> TSLA Options Dashboard v2 (SMA-based)<br>
+        <b>Usage:</b> Visual confirmation before placing trades<br>
+        <b>Integration:</b> Manual (visual only, no API)
+      </div>
+      <span class="tag tag-port">tradingview.com</span>
+    </div>
+  </div>
+
+  <!-- Data Flow Connections -->
+  <div class="connections">
+    <h2>Data Flow Routes</h2>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#fb923c">📡 Scan Pipeline:</span>
+      <span class="flow-step">Scheduler triggers</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Yahoo price</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">IBKR chain fetch</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Greeks calc</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">IV + strategy filter</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Score & rank</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Supabase write</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Telegram notify</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#60a5fa">📱 Telegram cmd:</span>
+      <span class="flow-step">User sends /command</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Bot long-poll receives</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Slash gate check</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Command router</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Handler executes</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Reply sent</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#4ade80">🔄 Trade workflow:</span>
+      <span class="flow-step">Scan (auto/manual)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">pending (Supabase)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/star N → starred</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/approve N → approved</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Place in IBKR</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/placed N → trade_log</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#fb7185">🌐 Dashboard:</span>
+      <span class="flow-step">User visits netlify</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">React SPA loads</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Supabase query</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Display candidates/trades</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#a78bfa">🤖 AI query:</span>
+      <span class="flow-step">/askclaude question</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Anthropic API (claude-sonnet-4-6)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Reply to Telegram</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#22d3ee">🦙 AI query:</span>
+      <span class="flow-step">/askllama question</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">OpenRouter API (llama-3.3-70b)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Reply to Telegram</span>
+    </div>
+  </div>
+
+  <!-- Diagnostic Quick Reference -->
+  <div class="connections">
+    <h2>Diagnostic Quick Reference</h2>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#ef4444">❌ No scan results:</span>
+      <span class="flow-step">Check /config filters</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Try: /set min_iv 0.30</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Check IBKR connection (/health)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Check Yahoo price works</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#ef4444">❌ IBKR Error 10197:</span>
+      <span class="flow-step">Close all other TWS sessions</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Phone, browser, other computers</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Only Mac Mini should be connected</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#ef4444">❌ Telegram 400:</span>
+      <span class="flow-step">Markdown parse error</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Bot auto-retries as plain text</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Check for _ outside ``` blocks</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#ef4444">❌ Supabase fail:</span>
+      <span class="flow-step">Non-fatal (scan still delivers)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">Check .env SUPABASE_URL/KEY</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/health shows status</span>
+    </div>
+
+    <div class="flow">
+      <span class="flow-label" style="color:#ef4444">❌ Scan stuck:</span>
+      <span class="flow-step">/cancelscan (1st try)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/cancelscan again → force reset</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">If still stuck: restart bot</span>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <h2>Legend</h2>
+    <div class="legend-items">
+      <div class="legend-item"><div class="legend-dot" style="background:#1d4ed8"></div> Control / Interface</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Processing / Brain</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div> Data Storage</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ea580c"></div> Broker</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e11d48"></div> Dashboard / Output</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#0891b2"></div> External Service</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
