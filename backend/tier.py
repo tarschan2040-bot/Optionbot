@@ -47,8 +47,16 @@ TIERS = {
 }
 
 
+## BETA MODE: All users get Max tier until payment system launches.
+## When ready to enforce tiers, set this to False.
+BETA_ALL_MAX = True
+
+
 def get_user_tier(user_id: str) -> str:
-    """Look up user's tier from subscriptions table. Defaults to 'free'."""
+    """Look up user's tier from subscriptions table. Defaults to 'max' during beta."""
+    if BETA_ALL_MAX:
+        return "max"
+
     try:
         supabase = SupabaseClient()
         if not supabase.is_enabled():
