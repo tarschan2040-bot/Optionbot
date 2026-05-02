@@ -46,6 +46,16 @@ Already configured. Ensure these tables exist (run migrations in order):
 - `migrations/002_create_scan_results.sql`
 - `migrations/003_create_subscriptions.sql`
 
+Auth URL configuration also matters for email confirmation and password reset flows:
+
+- Set **Site URL** to your deployed frontend domain, not localhost
+- Add your production callback URL to **Redirect URLs**
+- Keep localhost callback URLs only for local development if needed
+
+Recommended production redirect URL:
+
+- `https://optionbot-theta.vercel.app/auth/callback`
+
 Update RLS policies for production:
 ```sql
 -- Replace Phase 0 open policies with proper user isolation
