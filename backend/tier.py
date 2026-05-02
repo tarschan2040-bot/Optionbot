@@ -116,6 +116,7 @@ def get_portfolio_count(user_id: str) -> int:
         resp = (
             supabase._client.table("trade_log")
             .select("id", count="exact")
+            .eq("user_id", user_id)
             .is_("exit_date", "null")
             .execute()
         )

@@ -202,6 +202,7 @@ async def list_candidates(user_id: str = Depends(get_current_user)):
         resp = (
             supabase._client.table("trade_candidates")
             .select("id, ticker, strategy, strike, expiry, dte, delta, premium, score, scan_time")
+            .eq("user_id", user_id)
             .eq("status", "starred")
             .order("scan_time", desc=True)
             .execute()
@@ -221,6 +222,7 @@ async def star_candidate(
     supabase = _get_supabase()
     try:
         row = {
+            "user_id": user_id,
             "ticker": body.ticker,
             "strategy": body.strategy,
             "strike": body.strike,
@@ -254,7 +256,7 @@ async def confirm_candidate(
     Writes to trade_log and updates candidate status.
     """
     supabase = _get_supabase()
-    ok = supabase.place_candidate(candidate_id, entry_price=None)
+    ok = supabase.place_candidate(candidate_id, entry_price=None, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to confirm.")
     return ActionResponse(success=True, message="Trade confirmed and added to portfolio.")
@@ -267,7 +269,7 @@ async def remove_candidate(
 ):
     """Remove (reject) a starred candidate."""
     supabase = _get_supabase()
-    ok = supabase.reject_candidate(candidate_id)
+    ok = supabase.reject_candidate(candidate_id, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to remove.")
     return ActionResponse(success=True, message="Candidate removed.")
@@ -287,6 +289,7 @@ async def get_positions(user_id: str = Depends(get_current_user)):
         resp = (
             supabase._client.table("trade_log")
             .select("*")
+            .eq("user_id", user_id)
             .is_("exit_date", "null")
             .order("trade_date", desc=True)
             .execute()
@@ -360,6 +363,7 @@ async def get_portfolio_summary(user_id: str = Depends(get_current_user)):
         resp = (
             supabase._client.table("trade_log")
             .select("*")
+            .eq("user_id", user_id)
             .order("trade_date", desc=True)
             .execute()
         )

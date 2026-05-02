@@ -400,23 +400,23 @@ class SupabaseClient:
     # Fetch lists
     # ─────────────────────────────────────────────────────────────────────
 
-    def get_starred(self) -> List[dict]:
+    def get_starred(self, user_id: Optional[str] = None) -> List[dict]:
         """Return all starred candidates, newest first."""
-        return self._fetch_by_status("starred")
+        return self._fetch_by_status("starred", user_id=user_id)
 
-    def get_approved(self) -> List[dict]:
+    def get_approved(self, user_id: Optional[str] = None) -> List[dict]:
         """Return all approved candidates, newest first."""
-        return self._fetch_by_status("approved")
+        return self._fetch_by_status("approved", user_id=user_id)
 
-    def get_placed(self) -> List[dict]:
+    def get_placed(self, user_id: Optional[str] = None) -> List[dict]:
         """Return all placed trades, newest first."""
-        return self._fetch_by_status("placed")
+        return self._fetch_by_status("placed", user_id=user_id)
 
-    def _fetch_by_status(self, status: str) -> List[dict]:
+    def _fetch_by_status(self, status: str, user_id: Optional[str] = None) -> List[dict]:
         if not self._enabled:
             return []
         try:
-            resp = (
+            query = (
                 self._client.table(self.TABLE_CANDIDATES)
                 .select(
                     "id, scan_time, ticker, strategy, strike, expiry, "
@@ -424,9 +424,10 @@ class SupabaseClient:
                     "approved_at, rejected_at, notes"
                 )
                 .eq("status", status)
-                .order("scan_time", desc=True)
-                .execute()
             )
+            if user_id:
+                query = query.eq("user_id", user_id)
+            resp = query.order("scan_time", desc=True).execute()
             return resp.data or []
         except Exception as e:
             log.error("_fetch_by_status(%s) failed: %s", status, e)
@@ -436,9 +437,9 @@ class SupabaseClient:
     # Workflow actions
     # ─────────────────────────────────────────────────────────────────────
 
-    def star_candidate(self, candidate_id: str) -> bool:
+    def star_candidate(self, candidate_id: str, user_id: Optional[str] = None) -> bool:
         """Star a pending candidate by ID. Sets status = 'starred'."""
-        return self._update_status(candidate_id, "starred")
+        return self._update_status(candidate_id, "starred", user_id=user_id)
 
     def find_and_star(self, opportunity, scan_time) -> str:
         """
@@ -500,7 +501,7 @@ class SupabaseClient:
             log.error("find_and_star failed: %s", e)
             return "error" 
 
-    def approve_candidate(self, candidate_id: str) -> bool:
+    def approve_candidate(self, candidate_id: str, user_id: Optional[str] = None) -> bool:
         """
         Approve a starred candidate.
         Sets status = 'approved', records approved_at timestamp.
@@ -508,10 +509,13 @@ class SupabaseClient:
         if not self._enabled:
             return False
         try:
-            self._client.table(self.TABLE_CANDIDATES).update({
+            query = self._client.table(self.TABLE_CANDIDATES).update({
                 "status":      "approved",
                 "approved_at": datetime.now().isoformat(),
-            }).eq("id", candidate_id).execute()
+            }).eq("id", candidate_id)
+            if user_id:
+                query = query.eq("user_id", user_id)
+            query.execute()
             log.info("Candidate approved: %s", candidate_id)
             return True
         except Exception as e:
@@ -523,6 +527,7 @@ class SupabaseClient:
         candidate_id: str,
         entry_price: Optional[float],
         placed_at: Optional[datetime] = None,
+        user_id: Optional[str] = None,
     ) -> bool:
         """
         Mark a candidate as placed (order executed in IBKR).
@@ -542,19 +547,23 @@ class SupabaseClient:
 
         try:
             # ── 1. Update trade_candidates status ────────────────────────
-            self._client.table(self.TABLE_CANDIDATES).update({
+            candidate_update = self._client.table(self.TABLE_CANDIDATES).update({
                 "status": "placed",
                 "notes":  f"Placed at {placed_time.strftime('%Y-%m-%d %H:%M')}",
-            }).eq("id", candidate_id).execute()
+            }).eq("id", candidate_id)
+            if user_id:
+                candidate_update = candidate_update.eq("user_id", user_id)
+            candidate_update.execute()
 
             # ── 2. Fetch full candidate data ─────────────────────────────
-            resp = (
+            candidate_query = (
                 self._client.table(self.TABLE_CANDIDATES)
                 .select("*")
                 .eq("id", candidate_id)
-                .single()
-                .execute()
             )
+            if user_id:
+                candidate_query = candidate_query.eq("user_id", user_id)
+            resp = candidate_query.single().execute()
             c = resp.data
             if not c:
                 log.error("place_candidate: candidate %s not found.", candidate_id)
@@ -575,6 +584,7 @@ class SupabaseClient:
 
             # ── 4. Write to trade_log ────────────────────────────────────
             trade_row = {
+                "user_id":       user_id,
                 "trade_date":    placed_time.strftime("%Y-%m-%d"),
                 "ticker":        c["ticker"],
                 "strategy":      c["strategy"],
@@ -602,7 +612,7 @@ class SupabaseClient:
             log.error("place_candidate failed: %s", e)
             return False
 
-    def reject_candidate(self, candidate_id: str) -> bool:
+    def reject_candidate(self, candidate_id: str, user_id: Optional[str] = None) -> bool:
         """
         Reject a starred or approved candidate.
         Sets status = 'rejected', records rejected_at timestamp.
@@ -610,21 +620,24 @@ class SupabaseClient:
         if not self._enabled:
             return False
         try:
-            self._client.table(self.TABLE_CANDIDATES).update({
+            query = self._client.table(self.TABLE_CANDIDATES).update({
                 "status":      "rejected",
                 "rejected_at": datetime.now().isoformat(),
-            }).eq("id", candidate_id).execute()
+            }).eq("id", candidate_id)
+            if user_id:
+                query = query.eq("user_id", user_id)
+            query.execute()
             log.info("Candidate rejected: %s", candidate_id)
             return True
         except Exception as e:
             log.error("reject_candidate failed: %s", e)
             return False
 
-    def unstar_candidate(self, candidate_id: str) -> bool:
+    def unstar_candidate(self, candidate_id: str, user_id: Optional[str] = None) -> bool:
         """Unstar a candidate — reverts status back to 'pending'."""
-        return self._update_status(candidate_id, "pending")
+        return self._update_status(candidate_id, "pending", user_id=user_id)
 
-    def clear_by_status(self, from_status: str, to_status: str) -> int:
+    def clear_by_status(self, from_status: str, to_status: str, user_id: Optional[str] = None) -> int:
         """
         Bulk-update all candidates with status=from_status to to_status.
         Used by /clearstarred, /clearapproved, /clearplaced commands.
@@ -637,12 +650,14 @@ class SupabaseClient:
         if not self._enabled:
             return -1
         try:
-            resp = (
+            query = (
                 self._client.table(self.TABLE_CANDIDATES)
                 .update({"status": to_status})
                 .eq("status", from_status)
-                .execute()
             )
+            if user_id:
+                query = query.eq("user_id", user_id)
+            resp = query.execute()
             count = len(resp.data) if resp.data else 0
             log.info(
                 "clear_by_status: %d row(s) moved %s → %s",
@@ -657,7 +672,7 @@ class SupabaseClient:
     # Portfolio (open trades in trade_log)
     # ─────────────────────────────────────────────────────────────────────
 
-    def get_portfolio(self) -> List[dict]:
+    def get_portfolio(self, user_id: Optional[str] = None) -> List[dict]:
         """
         Return all open (not yet closed) trades from trade_log,
         ordered by trade_date descending (most recent first).
@@ -667,7 +682,7 @@ class SupabaseClient:
         if not self._enabled:
             return []
         try:
-            resp = (
+            query = (
                 self._client.table(self.TABLE_TRADE_LOG)
                 .select(
                     "id, trade_date, ticker, strategy, strike, expiry, "
@@ -676,9 +691,10 @@ class SupabaseClient:
                     "exit_date, exit_price, pnl"
                 )
                 .is_("exit_date", "null")
-                .order("trade_date", desc=True)
-                .execute()
             )
+            if user_id:
+                query = query.eq("user_id", user_id)
+            resp = query.order("trade_date", desc=True).execute()
             return resp.data or []
         except Exception as e:
             log.error("get_portfolio failed: %s", e)
@@ -688,13 +704,16 @@ class SupabaseClient:
     # Internal helpers
     # ─────────────────────────────────────────────────────────────────────
 
-    def _update_status(self, candidate_id: str, status: str) -> bool:
+    def _update_status(self, candidate_id: str, status: str, user_id: Optional[str] = None) -> bool:
         if not self._enabled:
             return False
         try:
-            self._client.table(self.TABLE_CANDIDATES).update(
+            query = self._client.table(self.TABLE_CANDIDATES).update(
                 {"status": status}
-            ).eq("id", candidate_id).execute()
+            ).eq("id", candidate_id)
+            if user_id:
+                query = query.eq("user_id", user_id)
+            query.execute()
             log.info("Candidate %s → %s", candidate_id, status)
             return True
         except Exception as e:

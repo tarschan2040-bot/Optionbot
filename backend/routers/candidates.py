@@ -236,6 +236,7 @@ async def list_candidates(
         resp = (
             supabase._client.table("trade_candidates")
             .select("id, ticker, strategy, strike, expiry, dte, delta, premium, score, iv_rank, ann_return, status, scan_time")
+            .eq("user_id", user_id)
             .eq("status", "starred")
             .order("scan_time", desc=True)
             .execute()
@@ -255,6 +256,7 @@ async def star_candidate(
     supabase = _get_supabase()
     try:
         row = {
+            "user_id":       user_id,
             "ticker":        body.ticker,
             "strategy":      body.strategy,
             "strike":        body.strike,
@@ -291,19 +293,21 @@ async def confirm_candidate(
             "status": "placed",
             "approved_at": datetime.now().isoformat(),
             "notes": f"Confirmed {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        }).eq("id", candidate_id).execute()
+        }).eq("id", candidate_id).eq("user_id", user_id).execute()
 
         # Fetch the candidate to write to trade_log
         resp = (
             supabase._client.table("trade_candidates")
             .select("*")
             .eq("id", candidate_id)
+            .eq("user_id", user_id)
             .single()
             .execute()
         )
         c = resp.data
         if c:
             trade_row = {
+                "user_id":       user_id,
                 "trade_date":    datetime.now().strftime("%Y-%m-%d"),
                 "ticker":        c["ticker"],
                 "strategy":      c["strategy"],
@@ -335,7 +339,7 @@ async def remove_candidate(
     try:
         supabase._client.table("trade_candidates").update(
             {"status": "rejected"}
-        ).eq("id", candidate_id).execute()
+        ).eq("id", candidate_id).eq("user_id", user_id).execute()
         return ActionResponse(success=True, message="Candidate removed.")
     except Exception as e:
         log.error("remove_candidate failed: %s", e)
@@ -357,6 +361,7 @@ async def get_portfolio(
         resp = (
             supabase._client.table("trade_log")
             .select("*")
+            .eq("user_id", user_id)
             .is_("exit_date", "null")
             .order("trade_date", desc=True)
             .execute()
@@ -459,6 +464,7 @@ async def get_portfolio_summary(
         open_resp = (
             supabase._client.table("trade_log")
             .select("entry_price, contracts, net_premium")
+            .eq("user_id", user_id)
             .is_("exit_date", "null")
             .execute()
         )
@@ -468,6 +474,7 @@ async def get_portfolio_summary(
         all_resp = (
             supabase._client.table("trade_log")
             .select("entry_price, exit_price, contracts, net_premium, pnl, exit_date")
+            .eq("user_id", user_id)
             .execute()
         )
         all_trades = all_resp.data or []
@@ -537,6 +544,7 @@ async def close_trade(
             supabase._client.table("trade_log")
             .select("*")
             .eq("id", trade_id)
+            .eq("user_id", user_id)
             .single()
             .execute()
         )
@@ -555,7 +563,7 @@ async def close_trade(
             "exit_date": datetime.now().strftime("%Y-%m-%d"),
             "exit_price": exit_price,
             "pnl": pnl,
-        }).eq("id", trade_id).execute()
+        }).eq("id", trade_id).eq("user_id", user_id).execute()
 
         return ActionResponse(
             success=True,
