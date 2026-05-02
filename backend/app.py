@@ -39,10 +39,15 @@ _origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://optionbot-theta.vercel.app",
+    "https://app.optionbot.org",
+    "https://optionbot.org",
 ]
-_extra = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
-if _extra and _extra not in _origins:
-    _origins.append(_extra)
+_extra = os.getenv("FRONTEND_URL", "").strip()
+if _extra:
+    for origin in _extra.split(","):
+        cleaned = origin.strip().rstrip("/")
+        if cleaned and cleaned not in _origins:
+            _origins.append(cleaned)
 
 app.add_middleware(
     CORSMiddleware,

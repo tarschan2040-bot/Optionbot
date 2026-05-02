@@ -37,12 +37,22 @@ export default function ParametersPage() {
   const [tickerInput, setTickerInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const loadConfig = useCallback(async () => {
     if (!token) return;
-    try { const d = await getConfig(token); setConfig(d); setTickerInput(d.tickers.join(", ")); }
-    catch { setError("Failed to load config."); }
+    setLoading(true);
+    try {
+      const d = await getConfig(token);
+      setConfig(d);
+      setTickerInput(d.tickers.join(", "));
+      setError("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load config.");
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
 
   useEffect(() => { loadConfig(); }, [loadConfig]);
@@ -62,7 +72,49 @@ export default function ParametersPage() {
 
   function set(field: string, value: unknown) { if (config) setConfig({ ...config, [field]: value }); }
 
-  if (!token || !config) return null;
+  if (!token) return null;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white">
+        <Nav />
+        <main className="max-w-3xl mx-auto px-6 py-8">
+          <div className="text-center py-20 text-gray-500">Loading parameters...</div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white">
+        <Nav />
+        <main className="max-w-3xl mx-auto px-6 py-8">
+          <div className="flex items-center gap-4 mb-8">
+            <div className="flex gap-1 bg-gray-900 rounded-lg p-1 border border-gray-800">
+              <Link href="/scan" className="px-4 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white transition-colors">Results</Link>
+              <span className="px-4 py-2 rounded-md text-sm font-medium bg-gray-800 text-white">Parameters</span>
+            </div>
+          </div>
+          <div className="rounded-xl border border-red-700 bg-red-900/30 p-6">
+            <h2 className="text-lg font-semibold text-red-200">Unable to load parameters</h2>
+            <p className="mt-2 text-sm text-red-100/90">
+              {error || "The app could not reach the backend API."}
+            </p>
+            <p className="mt-3 text-sm text-gray-300">
+              Check that `NEXT_PUBLIC_API_URL` in Vercel points to your Railway backend and that Railway allows requests from `https://app.optionbot.org`.
+            </p>
+            <button
+              onClick={loadConfig}
+              className="mt-5 rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+            >
+              Retry
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
