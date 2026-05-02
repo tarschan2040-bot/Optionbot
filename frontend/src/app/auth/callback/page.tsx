@@ -24,6 +24,11 @@ function AuthCallbackContent() {
 
     async function handleCallback() {
       try {
+        const inlineError = searchParams.get("error");
+        if (inlineError) {
+          throw new Error(inlineError);
+        }
+
         const code = searchParams.get("code");
         const tokenHash = searchParams.get("token_hash");
         const rawType = searchParams.get("type");
@@ -44,6 +49,8 @@ function AuthCallbackContent() {
             type: rawType as EmailOtpType,
           });
           if (error) throw error;
+        } else if (!code && !tokenHash) {
+          throw new Error("No confirmation session found. Please try the link again or sign in manually.");
         }
 
         const {
