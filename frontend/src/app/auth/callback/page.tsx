@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase";
 
 const DEFAULT_NEXT = "/portfolio";
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
@@ -92,5 +92,26 @@ export default function AuthCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function AuthCallbackFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-950 px-6">
+      <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center shadow-xl">
+        <h1 className="text-2xl font-bold text-white">
+          Option<span className="text-emerald-400">Bot</span>
+        </h1>
+        <p className="mt-4 text-sm text-gray-300">Preparing confirmation...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={<AuthCallbackFallback />}>
+      <AuthCallbackContent />
+    </Suspense>
   );
 }
