@@ -76,12 +76,17 @@ class ScanOpportunity:
     score: float = 0.0          # composite ranking score (0–100)
 
     # Mean reversion indicators (populated by indicators.py)
-    mean_rev_score: float = 0.0         # 0–1 composite (direction-aware)
+    mean_rev_score: float = 0.0         # 0–1 effective composite used for scoring
+    mean_rev_raw_score: float = 0.0     # 0–1 setup score before timing/trend caps
+    mean_rev_score_sma: float = 0.0     # recent SMA of raw MR setup scores
+    mean_rev_available: bool = False    # False means score should treat MR as neutral
     rsi_5: float = 50.0                 # raw RSI(5) value (0–100)
     z_score_20: float = 0.0             # raw Z-Score(20) (typically -3 to +3)
     roc_pct_rank: float = 50.0          # ROC percentile rank (0–100)
     trend_guard_active: bool = False     # True if score was capped
     sma200_distance_pct: float = 0.0    # % distance from SMA(200)
+    mr_timing_confirmed: bool = False
+    mr_timing_status: str = "disabled"
 
     # Filter flags (for debugging)
     passed_filters: bool = True
@@ -135,9 +140,13 @@ class ScanOpportunity:
             "Score":        f"{self.score:.1f}",
         }
         # Mean reversion fields (only if populated / non-default)
-        if self.mean_rev_score > 0:
+        if self.mean_rev_available:
             tg_flag = " ⚠TG" if self.trend_guard_active else ""
             d["MR Score"] = f"{self.mean_rev_score:.2f}{tg_flag}"
+            if self.mean_rev_raw_score and self.mean_rev_raw_score != self.mean_rev_score:
+                d["MR Raw"] = f"{self.mean_rev_raw_score:.2f}"
+            if self.mr_timing_status != "disabled":
+                d["MR Timing"] = self.mr_timing_status
             d["RSI(5)"] = f"{self.rsi_5:.0f}"
             d["Z-Score"] = f"{self.z_score_20:+.2f}"
             d["ROC %Rank"] = f"{self.roc_pct_rank:.0f}"

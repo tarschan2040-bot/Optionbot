@@ -113,6 +113,7 @@ class OptionScanner:
                 f"Mean Rev  : {'ON (w={:.0f}%)'.format(cfg.weight_mean_reversion*100) if cfg.use_mean_reversion else 'OFF'}\n"
                 f"  RSI({cfg.mr_rsi_period}) {cfg.mr_w_rsi:.0%} | Z({cfg.mr_z_period}) {cfg.mr_w_z:.0%} | ROC({cfg.mr_roc_period}) {cfg.mr_w_roc:.0%}\n"
                 f"  Trend Guard: {'ON (>{:.0f}% from SMA200)'.format(cfg.mr_trend_pct) if cfg.mr_trend_guard else 'OFF'}\n"
+                f"  Timing: {'ON (SMA {}, cap {:.0f}%)'.format(cfg.mr_timing_sma_period, cfg.mr_timing_unconfirmed_cap*100) if cfg.mr_timing_confirmation else 'OFF'}\n"
                 f"```"
             )
 
@@ -176,14 +177,18 @@ class OptionScanner:
                     w_roc=cfg.mr_w_roc,
                     trend_guard=cfg.mr_trend_guard,
                     trend_pct=cfg.mr_trend_pct,
+                    timing_confirmation=cfg.mr_timing_confirmation,
+                    timing_sma_period=cfg.mr_timing_sma_period,
+                    timing_unconfirmed_cap=cfg.mr_timing_unconfirmed_cap,
                 )
             # Log once per ticker
             mr_c = mr_results.get("C")
             if mr_c:
                 log.info(
                     "%s MR indicators: RSI(5)=%.0f  Z(20)=%+.2f  ROC%%Rank=%.0f  "
-                    "SMA200 dist=%.1f%%  TrendGuard=%s",
+                    "MR raw=%.2f effective=%.2f timing=%s  SMA200 dist=%.1f%%  TrendGuard=%s",
                     ticker, mr_c.rsi, mr_c.z_score, mr_c.roc_pct_rank,
+                    mr_c.raw_score, mr_c.score, mr_c.timing_status,
                     mr_c.sma200_distance_pct,
                     "ACTIVE" if mr_c.trend_guard_active else "off",
                 )
@@ -259,11 +264,16 @@ class OptionScanner:
                         mr = mr_results.get(direction)
                         if mr is not None:
                             opp.mean_rev_score = mr.score
+                            opp.mean_rev_raw_score = mr.raw_score
+                            opp.mean_rev_score_sma = mr.score_sma or 0.0
+                            opp.mean_rev_available = True
                             opp.rsi_5 = mr.rsi
                             opp.z_score_20 = mr.z_score
                             opp.roc_pct_rank = mr.roc_pct_rank
                             opp.trend_guard_active = mr.trend_guard_active
                             opp.sma200_distance_pct = mr.sma200_distance_pct
+                            opp.mr_timing_confirmed = mr.timing_confirmed
+                            opp.mr_timing_status = mr.timing_status
                         opportunities.append(opp)
                         found = True
                     else:

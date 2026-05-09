@@ -156,6 +156,13 @@ class ScannerConfig:
     mr_trend_guard: bool = True
     mr_trend_pct: float = 15.0          # % distance from SMA(200) to trigger guard
 
+    # MR Timing Confirmation — Option 2 by default.
+    # Raw MR still detects the setup; timing confirmation can cap strong
+    # unconfirmed setups until the MR score starts cooling from an extreme.
+    mr_timing_confirmation: bool = True
+    mr_timing_sma_period: int = 3       # daily score SMA used for rollover context
+    mr_timing_unconfirmed_cap: float = 0.75
+
     def validate(self):
         # All 6 weights must always sum to 1.0.
         # When MR is off, the scorer re-normalises the remaining 5 at runtime,
@@ -165,22 +172,31 @@ class ScannerConfig:
             self.weight_delta_safety, self.weight_liquidity,
             self.weight_ann_return, self.weight_mean_reversion,
         ]
-        assert abs(sum(weights) - 1.0) < 0.001, (
-            f"Scoring weights must sum to 1.0 (got {sum(weights):.3f})"
-        )
-        assert 0.0 <= self.min_iv <= 2.0, "min_iv should be 0.0–2.0 (e.g. 0.40 = 40% IV)"
+        if abs(sum(weights) - 1.0) >= 0.001:
+            raise ValueError(f"Scoring weights must sum to 1.0 (got {sum(weights):.3f})")
+        if not (0.0 <= self.min_iv <= 2.0):
+            raise ValueError("min_iv should be 0.0–2.0 (e.g. 0.40 = 40% IV)")
 
         # DTE bounds
-        assert self.min_dte >= 0, f"min_dte must be >= 0 (got {self.min_dte})"
-        assert self.max_dte >= self.min_dte, (
-            f"max_dte ({self.max_dte}) must be >= min_dte ({self.min_dte})"
-        )
+        if self.min_dte < 0:
+            raise ValueError(f"min_dte must be >= 0 (got {self.min_dte})")
+        if self.max_dte < self.min_dte:
+            raise ValueError(
+                f"max_dte ({self.max_dte}) must be >= min_dte ({self.min_dte})"
+            )
 
         # MR sub-weights
         mr_w = self.mr_w_rsi + self.mr_w_z + self.mr_w_roc
-        assert abs(mr_w - 1.0) < 0.001, (
-            f"MR sub-weights must sum to 1.0 (got {mr_w:.3f})"
-        )
+        if abs(mr_w - 1.0) >= 0.001:
+            raise ValueError(f"MR sub-weights must sum to 1.0 (got {mr_w:.3f})")
+
+        # MR timing confirmation
+        if self.mr_timing_sma_period < 2:
+            raise ValueError(
+                f"mr_timing_sma_period must be >= 2 (got {self.mr_timing_sma_period})"
+            )
+        if not (0.50 <= self.mr_timing_unconfirmed_cap <= 1.0):
+            raise ValueError("mr_timing_unconfirmed_cap must be between 0.50 and 1.00")
         return self
 
     def config_hash(self) -> str:

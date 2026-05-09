@@ -64,6 +64,9 @@ class ConfigResponse(BaseModel):
     mr_w_roc: float
     mr_trend_guard: bool
     mr_trend_pct: float
+    mr_timing_confirmation: bool
+    mr_timing_sma_period: int
+    mr_timing_unconfirmed_cap: float
 
     config_hash: str = ""
 
@@ -114,6 +117,9 @@ class ConfigUpdate(BaseModel):
     mr_w_roc: Optional[float] = None
     mr_trend_guard: Optional[bool] = None
     mr_trend_pct: Optional[float] = None
+    mr_timing_confirmation: Optional[bool] = None
+    mr_timing_sma_period: Optional[int] = None
+    mr_timing_unconfirmed_cap: Optional[float] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -178,7 +184,7 @@ async def update_config(
     # Validate before saving
     try:
         config.validate()
-    except AssertionError as e:
+    except (AssertionError, ValueError) as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     # Save to DB

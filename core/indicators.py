@@ -33,12 +33,17 @@ log = logging.getLogger(__name__)
 @dataclass
 class MeanReversionResult:
     """Result of mean reversion analysis for one ticker + direction."""
-    score: float            # 0.0–1.0 composite (direction-aware)
+    score: float            # 0.0–1.0 effective composite used for scoring
+    raw_score: float        # 0.0–1.0 setup score before timing/trend caps
     rsi: float              # raw RSI(5) value (0–100)
     z_score: float          # raw Z-Score (typically -3 to +3)
     roc_pct_rank: float     # ROC percentile rank (0–100)
     trend_guard_active: bool  # True if score was capped by trend guard
     sma200_distance_pct: float  # % distance from SMA(200)
+    score_sma: Optional[float] = None  # SMA of recent raw MR scores
+    timing_confirmation_enabled: bool = False
+    timing_confirmed: bool = False
+    timing_status: str = "disabled"  # disabled | neutral | waiting | confirmed | insufficient_history
 
 
 # ── Component Calculators ────────────────────────────────────────────────
@@ -151,6 +156,86 @@ def compute_sma(prices: List[float], period: int = 200) -> Optional[float]:
     return sum(prices[-period:]) / period
 
 
+def _is_call_strategy(strategy: str) -> bool:
+    """Return True for covered-call/call direction strategy labels."""
+    return strategy.upper() in ("CC", "C", "COVERED_CALL")
+
+
+def _directional_setup_score(
+    prices: List[float],
+    strategy: str,
+    rsi_period: int,
+    z_period: int,
+    roc_period: int,
+    w_rsi: float,
+    w_z: float,
+    w_roc: float,
+) -> tuple[float, float, float, float]:
+    """
+    Return direction-aware setup score and raw components.
+
+    Higher score means better mean-reversion setup for the strategy:
+    overbought for calls, oversold for puts.
+    """
+    rsi = compute_rsi(prices, rsi_period)
+    z = compute_z_score(prices, z_period)
+    roc_rank = compute_roc_percentile_rank(prices, roc_period)
+
+    rsi_norm = rsi / 100.0
+    z_norm = max(0.0, min(1.0, (z + 3.0) / 6.0))
+    roc_norm = roc_rank / 100.0
+
+    total_w = w_rsi + w_z + w_roc
+    if total_w == 0:
+        total_w = 1.0
+
+    overbought_score = (
+        rsi_norm * w_rsi + z_norm * w_z + roc_norm * w_roc
+    ) / total_w
+
+    if _is_call_strategy(strategy):
+        return overbought_score, rsi, z, roc_rank
+    return 1.0 - overbought_score, rsi, z, roc_rank
+
+
+def _compute_directional_score_sma(
+    prices: List[float],
+    strategy: str,
+    sma_period: int,
+    rsi_period: int,
+    z_period: int,
+    roc_period: int,
+    w_rsi: float,
+    w_z: float,
+    w_roc: float,
+) -> tuple[Optional[float], Optional[float]]:
+    """Return (SMA of recent raw setup scores, previous raw setup score)."""
+    if sma_period < 2 or len(prices) < sma_period + 1:
+        return None, None
+
+    scores = []
+    start = len(prices) - sma_period
+    for end_idx in range(start + 1, len(prices) + 1):
+        score, _, _, _ = _directional_setup_score(
+            prices[:end_idx],
+            strategy,
+            rsi_period,
+            z_period,
+            roc_period,
+            w_rsi,
+            w_z,
+            w_roc,
+        )
+        scores.append(score)
+
+    if len(scores) < sma_period:
+        return None, None
+
+    score_sma = sum(scores) / len(scores)
+    previous_score = scores[-2] if len(scores) >= 2 else None
+    return score_sma, previous_score
+
+
 # ── Composite Mean Reversion Score ───────────────────────────────────────
 
 
@@ -165,6 +250,9 @@ def compute_mean_reversion_score(
     w_roc: float = 0.20,
     trend_guard: bool = True,
     trend_pct: float = 15.0,
+    timing_confirmation: bool = True,
+    timing_sma_period: int = 3,
+    timing_unconfirmed_cap: float = 0.75,
 ) -> MeanReversionResult:
     """
     Compute direction-aware mean reversion composite score for option selling.
@@ -193,37 +281,68 @@ def compute_mean_reversion_score(
         If True, cap score when price is far from SMA(200).
     trend_pct : float
         Threshold for trend guard (default 15%).
+    timing_confirmation : bool
+        If True, cap strong unconfirmed MR setups until the raw setup score
+        starts rolling over relative to its recent score SMA.
+    timing_sma_period : int
+        Number of recent raw MR scores used for timing context.
+    timing_unconfirmed_cap : float
+        Maximum effective MR score for a strong setup that has not confirmed.
 
     Returns
     -------
     MeanReversionResult
     """
     # Determine direction: selling calls benefits from overbought, puts from oversold
-    is_call = strategy.upper() in ("CC", "C", "COVERED_CALL")
+    is_call = _is_call_strategy(strategy)
 
-    # Compute raw indicators
-    rsi = compute_rsi(prices, rsi_period)
-    z = compute_z_score(prices, z_period)
-    roc_rank = compute_roc_percentile_rank(prices, roc_period)
+    # Raw setup score before timing/trend caps.
+    raw_score, rsi, z, roc_rank = _directional_setup_score(
+        prices,
+        strategy,
+        rsi_period,
+        z_period,
+        roc_period,
+        w_rsi,
+        w_z,
+        w_roc,
+    )
+    score = raw_score
 
-    # Normalise each to 0–1
-    rsi_norm = rsi / 100.0                                          # already 0–100
-    z_norm = max(0.0, min(1.0, (z + 3.0) / 6.0))                   # Z ∈ [-3,+3] → [0,1]
-    roc_norm = roc_rank / 100.0                                     # already 0–100
+    # ── Timing Confirmation ─────────────────────────────────────────────
+    # Strong MR setups can keep stretching. By default, cap an unconfirmed
+    # extreme until the setup score starts cooling relative to its score SMA.
+    score_sma = None
+    timing_confirmed = False
+    timing_status = "disabled"
+    cap = max(0.50, min(1.0, timing_unconfirmed_cap))
 
-    # Weighted composite (0–1), where 1.0 = maximally overbought
-    total_w = w_rsi + w_z + w_roc
-    if total_w == 0:
-        total_w = 1.0
-    overbought_score = (rsi_norm * w_rsi + z_norm * w_z + roc_norm * w_roc) / total_w
+    if timing_confirmation:
+        score_sma, previous_score = _compute_directional_score_sma(
+            prices,
+            strategy,
+            timing_sma_period,
+            rsi_period,
+            z_period,
+            roc_period,
+            w_rsi,
+            w_z,
+            w_roc,
+        )
 
-    # Direction flip:
-    # For calls: overbought = high score (good to sell call)
-    # For puts:  oversold = high score → flip: 1 - overbought_score
-    if is_call:
-        score = overbought_score
-    else:
-        score = 1.0 - overbought_score
+        if score_sma is None or previous_score is None:
+            timing_status = "insufficient_history"
+        elif raw_score <= cap:
+            timing_status = "neutral"
+        else:
+            rolling_down = raw_score < previous_score
+            sma_context = raw_score <= score_sma or previous_score >= score_sma
+            timing_confirmed = rolling_down and sma_context
+            if timing_confirmed:
+                timing_status = "confirmed"
+            else:
+                score = min(score, cap)
+                timing_status = "waiting"
 
     # ── Trend Guard ──────────────────────────────────────────────────────
     # Mean reversion fails in strong trends. Cap the score to prevent
@@ -252,9 +371,14 @@ def compute_mean_reversion_score(
 
     return MeanReversionResult(
         score=round(score, 4),
+        raw_score=round(raw_score, 4),
         rsi=round(rsi, 1),
         z_score=round(z, 2),
         roc_pct_rank=round(roc_rank, 1),
         trend_guard_active=tg_active,
         sma200_distance_pct=round(sma200_dist_pct, 1),
+        score_sma=round(score_sma, 4) if score_sma is not None else None,
+        timing_confirmation_enabled=timing_confirmation,
+        timing_confirmed=timing_confirmed,
+        timing_status=timing_status,
     )

@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS user_configs (
     mr_w_roc           FLOAT DEFAULT 0.20,
     mr_trend_guard     BOOLEAN DEFAULT TRUE,
     mr_trend_pct       FLOAT DEFAULT 15.0,
+    mr_timing_confirmation BOOLEAN DEFAULT TRUE,
+    mr_timing_sma_period   INT DEFAULT 3,
+    mr_timing_unconfirmed_cap FLOAT DEFAULT 0.75,
 
     -- Timestamps
     created_at      TIMESTAMPTZ DEFAULT now(),

@@ -1,5 +1,6 @@
 # ── Secrets (NEVER commit) ────────────────────────────
 .env
+.env.shadow
 .env.local
 .env.production
 frontend/.env.local

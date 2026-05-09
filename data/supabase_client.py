@@ -190,6 +190,9 @@ class SupabaseClient:
                 "cc_delta_max":           config.cc_delta_max,
                 "csp_delta_min":          config.csp_delta_min,
                 "csp_delta_max":          config.csp_delta_max,
+                "mr_timing_confirmation": config.mr_timing_confirmation,
+                "mr_timing_sma_period":   config.mr_timing_sma_period,
+                "mr_timing_unconfirmed_cap": config.mr_timing_unconfirmed_cap,
             }
             weight_snapshot = {
                 "ann_return":   config.weight_ann_return,
@@ -212,6 +215,9 @@ class SupabaseClient:
                     "iv":         round(float(o.greeks.iv), 4),
                     "ann_return": round(float(o.annualised_return), 4),
                     "score":      round(float(o.score), 2),
+                    "mr_score":   round(float(o.mean_rev_score), 4),
+                    "mr_raw_score": round(float(o.mean_rev_raw_score), 4),
+                    "mr_timing_status": o.mr_timing_status,
                 }
                 for i, o in enumerate(results)
             ]
@@ -299,6 +305,8 @@ class SupabaseClient:
             for field_name in db_fields:
                 if field_name in row:
                     value = row[field_name]
+                    if value is None:
+                        continue
                     # Postgres TEXT[] comes back as a Python list — ScannerConfig expects List[str]
                     if field_name == "tickers" and isinstance(value, list):
                         kwargs[field_name] = [str(t) for t in value]

@@ -50,8 +50,14 @@ class OpportunityScorer:
 
         # ── 6th component: Mean Reversion ────────────────────────
         if self.cfg.use_mean_reversion:
-            # mean_rev_score is already 0–1, direction-aware, computed by indicators.py
-            scores["mean_reversion"] = opp.mean_rev_score
+            # mean_rev_score is already 0–1, direction-aware, computed by indicators.py.
+            # It may be timing-adjusted when MR confirmation is enabled; raw setup
+            # strength stays on opp.mean_rev_raw_score for display/debugging.
+            # If price history was insufficient, treat MR as neutral instead of
+            # unfairly dragging otherwise valid opportunities toward zero.
+            scores["mean_reversion"] = (
+                opp.mean_rev_score if opp.mean_rev_available else 0.5
+            )
             weights["mean_reversion"] = self.cfg.weight_mean_reversion
         else:
             # When MR is disabled, redistribute its weight proportionally
