@@ -62,18 +62,21 @@ class SupabaseClient:
             return
 
         url = os.getenv("SUPABASE_URL", "").strip()
-        key = os.getenv("SUPABASE_KEY", "").strip()
+        service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        anon_key = os.getenv("SUPABASE_KEY", "").strip()
+        key = service_key or anon_key
 
         if not url or not key:
             log.warning(
-                "Supabase disabled — SUPABASE_URL or SUPABASE_KEY missing from .env"
+                "Supabase disabled — SUPABASE_URL and Supabase key missing from .env"
             )
             return
 
         try:
             self._client  = create_client(url, key)
             self._enabled = True
-            log.info("Supabase client initialised. URL: %s", url)
+            key_label = "service_role" if service_key else "anon"
+            log.info("Supabase client initialised. URL: %s key=%s", url, key_label)
         except Exception as e:
             log.error("Supabase client init failed: %s", e)
 
