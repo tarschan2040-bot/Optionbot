@@ -1,6 +1,21 @@
 # Ken — Master Handoff Document
 _Last updated: March 30, 2026 — Paste this into any new AI chat to continue without repeating history_
 
+Read `AGENTS.md` and `CURRENT_STATE.md` first; no code changes without my approval.
+
+## 2026-05-02 Addendum — Read This Before Using This File
+
+This handoff file is now historical context, not the primary live-status document.
+
+Major newer milestones that are **not** fully reflected below:
+- frontend app is live on `https://app.optionbot.org`
+- custom SMTP is working through Resend / `mail.optionbot.org`
+- Supabase email confirmation flow now uses a server-side `/auth/confirm` route
+- multi-user candidate + portfolio isolation has been implemented in code and schema migration `004`
+- new signup accounts are now created without inheriting old shared candidate/portfolio data
+
+Use `CURRENT_STATE.md` as the main up-to-date communication file.
+
 ---
 
 ## ⚡ QUICK STATUS (Update This Every Session)

@@ -190,8 +190,10 @@ export default function PortfolioPage() {
   }, [token]);
 
   useEffect(() => {
-    if (activeTab === "candidates") loadCandidates();
-    else loadPortfolio();
+    queueMicrotask(() => {
+      if (activeTab === "candidates") void loadCandidates();
+      else void loadPortfolio();
+    });
   }, [activeTab, loadCandidates, loadPortfolio]);
 
   // Also load candidate count for badge
@@ -213,7 +215,12 @@ export default function PortfolioPage() {
     if (!token) return;
     const exitPrice = prompt("Exit price (option premium at close, 0 if expired worthless):");
     if (exitPrice === null) return;
-    try { const r = await closeTrade(token, id, parseFloat(exitPrice)); flash(r.message); loadPortfolio(); }
+    const parsedExitPrice = Number(exitPrice.trim());
+    if (!Number.isFinite(parsedExitPrice) || parsedExitPrice < 0) {
+      flash("Enter a valid exit price.");
+      return;
+    }
+    try { const r = await closeTrade(token, id, parsedExitPrice); flash(r.message); loadPortfolio(); }
     catch { flash("Failed."); }
   }
 

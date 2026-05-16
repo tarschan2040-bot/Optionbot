@@ -57,6 +57,15 @@ WATCHLIST = list(DEFAULT_WATCHLIST)
 STRATEGY  = "both"
 
 
+def _owner_user_id() -> Optional[str]:
+    """User UUID that owns legacy Telegram/scanner writes in SaaS mode."""
+    return (
+        _os.getenv("OPTIONBOT_OWNER_USER_ID", "").strip()
+        or _os.getenv("SUPABASE_OWNER_USER_ID", "").strip()
+        or None
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # NullNotifier — drop-in replacement when Telegram is disabled
 # ─────────────────────────────────────────────────────────────────────────
@@ -390,6 +399,7 @@ def run_scan(
                     saved, auto_starred = supabase.write_candidates(
                         results, scan_time, top_n=10,
                         autostar_threshold=autostar_threshold,
+                        user_id=_owner_user_id(),
                     )
                     log.info(
                         "Supabase: %d candidate(s) saved (%d auto-starred).",

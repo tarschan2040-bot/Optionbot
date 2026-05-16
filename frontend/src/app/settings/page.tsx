@@ -149,13 +149,15 @@ export default function SettingsPage() {
       const data = await getConfig(session.access_token);
       setConfig(data);
       setTickerInput(data.tickers.join(", "));
-    } catch (err) {
+    } catch {
       setError("Failed to load config.");
     }
   }, [session]);
 
   useEffect(() => {
-    loadConfig();
+    queueMicrotask(() => {
+      void loadConfig();
+    });
   }, [loadConfig]);
 
   async function handleSave() {

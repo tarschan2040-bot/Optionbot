@@ -128,6 +128,9 @@ SETTABLE_PARAMS = {
     "mr_w_roc":           ("mr_w_roc",              float, "ROC sub-weight within MR (default 0.20)"),
     "mr_trend_guard":     ("mr_trend_guard",        bool,  "Enable trend guard (true/false)"),
     "mr_trend_pct":       ("mr_trend_pct",          float, "Trend guard threshold % from SMA200 (default 15)"),
+    "mr_timing":          ("mr_timing_confirmation", bool, "Require MR timing confirmation (true/false)"),
+    "mr_timing_sma":      ("mr_timing_sma_period",  int,   "MR timing score SMA period (default 3)"),
+    "mr_unconfirmed_cap": ("mr_timing_unconfirmed_cap", float, "MR cap before timing confirms (default 0.75)"),
 }
 
 # ── Claude AI system prompt ───────────────────────────────────────────────
@@ -751,6 +754,8 @@ def _format_result_detail(results: list, rank: int, scan_time, scanned_tickers: 
             f"",
             f"-- Mean Reversion ------------",
             f"MR Score    : {o.mean_rev_score:.2f}{tg_str}",
+            f"MR Raw      : {getattr(o, 'mean_rev_raw_score', o.mean_rev_score):.2f}",
+            f"MR Timing   : {getattr(o, 'mr_timing_status', 'disabled')}",
             f"RSI(5)      : {o.rsi_5:.0f}",
             f"Z-Score(20) : {o.z_score_20:+.2f}",
             f"ROC %Rank   : {o.roc_pct_rank:.0f}",
@@ -1593,6 +1598,20 @@ class TelegramBotListener:
             log.error("Supabase init error: %s", e)
         return None
 
+    def _owner_user_id(self) -> Optional[str]:
+        """Supabase auth user UUID that owns legacy Telegram workflow rows."""
+        return (
+            os.getenv("OPTIONBOT_OWNER_USER_ID", "").strip()
+            or os.getenv("SUPABASE_OWNER_USER_ID", "").strip()
+            or None
+        )
+
+    def _missing_owner_user_id_msg(self) -> str:
+        return (
+            "OPTIONBOT_OWNER_USER_ID is not configured — refusing unscoped "
+            "candidate/portfolio access."
+        )
+
     def _handle_star(self, chat_id: str, parts: list) -> str:
         """star <n> — star result #n from the last scan (in-memory list)."""
         try:
@@ -1610,10 +1629,13 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available — cannot star candidates."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
         # Find existing pending row and update to starred.
         # Falls back to insert if no existing row found.
-        result = sb.find_and_star(o, scan_time)
+        result = sb.find_and_star(o, scan_time, user_id=owner_user_id)
         if result == "error":
             return "Failed to star candidate. Try again."
 
@@ -1637,15 +1659,18 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
-        rows = sb.get_starred()
+        rows = sb.get_starred(user_id=owner_user_id)
         if not rows:
             return "*Starred list is empty.*"
         if rank < 1 or rank > len(rows):
             return f"#{rank} not found. Send `starredlist` to see current items."
 
         candidate_id = rows[rank - 1]["id"]
-        if sb.unstar_candidate(candidate_id):
+        if sb.unstar_candidate(candidate_id, user_id=owner_user_id):
             row = rows[rank - 1]
             return (
                 f"↩ *Unstarred #{rank}*\n"
@@ -1664,8 +1689,11 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
-        rows = sb.get_starred()
+        rows = sb.get_starred(user_id=owner_user_id)
         if not rows:
             return "*Starred list is empty.*\n\nSend `starredlist` to check."
         if rank < 1 or rank > len(rows):
@@ -1674,7 +1702,7 @@ class TelegramBotListener:
         candidate_id = rows[rank - 1]["id"]
         row          = rows[rank - 1]
 
-        if sb.approve_candidate(candidate_id):
+        if sb.approve_candidate(candidate_id, user_id=owner_user_id):
             t_label = "CC" if "CALL" in str(row.get("strategy", "")).upper() else "CSP"
             return (
                 f"✅ *Approved #{rank}*\n\n"
@@ -1705,8 +1733,11 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
-        rows = sb.get_approved()
+        rows = sb.get_approved(user_id=owner_user_id)
         if not rows:
             return "*Approved list is empty.*\n\nSend `approvedlist` to check."
         if rank < 1 or rank > len(rows):
@@ -1721,7 +1752,12 @@ class TelegramBotListener:
         # We cannot fetch live option prices from Yahoo — pass None so
         # place_candidate() uses the scan premium as the best estimate.
         # Ken updates the actual fill manually in TOS if it differs.
-        ok = sb.place_candidate(candidate_id, entry_price=None, placed_at=placed_at)
+        ok = sb.place_candidate(
+            candidate_id,
+            entry_price=None,
+            placed_at=placed_at,
+            user_id=owner_user_id,
+        )
         if ok:
             t_label      = "CC" if "CALL" in str(row.get("strategy", "")).upper() else "CSP"
             contracts    = int(row.get("contracts") or 1)
@@ -1749,12 +1785,15 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
         # Try starred first, then approved
-        rows   = sb.get_starred()
+        rows   = sb.get_starred(user_id=owner_user_id)
         source = "starred"
         if rank > len(rows):
-            rows   = sb.get_approved()
+            rows   = sb.get_approved(user_id=owner_user_id)
             source = "approved"
 
         if not rows:
@@ -1765,7 +1804,7 @@ class TelegramBotListener:
         row          = rows[rank - 1]
         candidate_id = row["id"]
 
-        if sb.reject_candidate(candidate_id):
+        if sb.reject_candidate(candidate_id, user_id=owner_user_id):
             t_label = "CC" if "CALL" in str(row.get("strategy", "")).upper() else "CSP"
             return (
                 f"❌ *Rejected #{rank}* (from {source} list)\n\n"
@@ -1780,17 +1819,20 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available — cannot fetch list."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
         if status == "starred":
-            rows       = sb.get_starred()
+            rows       = sb.get_starred(user_id=owner_user_id)
             title      = "Starred Candidates"
             hint       = "approve <n> to approve  |  unstar <n> to remove  |  reject <n> to reject"
         elif status == "approved":
-            rows       = sb.get_approved()
+            rows       = sb.get_approved(user_id=owner_user_id)
             title      = "Approved Candidates"
             hint       = "placed <n> to confirm order placed  |  reject <n> to reject"
         else:
-            rows       = sb.get_placed()
+            rows       = sb.get_placed(user_id=owner_user_id)
             title      = "Placed Trades"
             hint       = "Trades logged to TOS. Update entry price manually if needed."
 
@@ -1809,6 +1851,9 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
         if which == "starred":
             from_status = "starred"
@@ -1831,7 +1876,7 @@ class TelegramBotListener:
         else:
             return "Unknown list. Use `clearstarred`, `clearapproved`, or `clearplaced`."
 
-        count = sb.clear_by_status(from_status, to_status)
+        count = sb.clear_by_status(from_status, to_status, user_id=owner_user_id)
         if count < 0:
             return f"Failed to clear {label} list. Try again."
         if count == 0:
@@ -1845,8 +1890,11 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
-        trades = sb.get_portfolio()
+        trades = sb.get_portfolio(user_id=owner_user_id)
         if not trades:
             return (
                 "*📌 Portfolio — Open Trades*\n\n"
@@ -1892,8 +1940,11 @@ class TelegramBotListener:
         sb = self._get_supabase()
         if not sb:
             return "Supabase not available."
+        owner_user_id = self._owner_user_id()
+        if not owner_user_id:
+            return self._missing_owner_user_id_msg()
 
-        trades = sb.get_portfolio()
+        trades = sb.get_portfolio(user_id=owner_user_id)
         if not trades:
             return "*No open trades in portfolio.*"
         if rank < 1 or rank > len(trades):
@@ -2400,6 +2451,9 @@ class TelegramBotListener:
         lines.append("mr_w_roc       ROC sub-weight (default 0.20)")
         lines.append("mr_trend_guard true/false (cap score in strong trends)")
         lines.append("mr_trend_pct   trend guard % from SMA200 (default 15)")
+        lines.append("mr_timing      true/false (cap until timing confirms)")
+        lines.append("mr_timing_sma  MR timing score SMA period (default 3)")
+        lines.append("mr_unconfirmed_cap MR cap before confirmation (default 0.75)")
         lines.append("")
         lines.append("-" * 42)
         lines.append("To change: set <param> <value>")

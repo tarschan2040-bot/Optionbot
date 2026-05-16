@@ -23,8 +23,8 @@ from core.models import OptionContract, GreeksResult
 
 log = logging.getLogger(__name__)
 
-# Risk-free rate (US 3-month T-bill approx) — update periodically
-RISK_FREE_RATE = 0.053
+# Risk-free rate (US 3-month T-bill approx). FRED DTB3: 3.61% on 2026-05-04.
+RISK_FREE_RATE = 0.0361
 
 
 def _d1_d2(S: float, K: float, T: float, r: float, sigma: float):

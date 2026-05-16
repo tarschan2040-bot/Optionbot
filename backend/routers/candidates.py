@@ -13,6 +13,7 @@ Portfolio page:   GET  /candidates/portfolio       — active trades with live m
                   POST /candidates/{id}/close       — close a trade (record exit)
 """
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -287,15 +288,10 @@ async def confirm_candidate(
 ):
     """Confirm a candidate — moves to portfolio as an active trade."""
     supabase = _get_supabase()
+    inserted_trade_id = None
     try:
-        # Update status to placed
-        supabase._client.table("trade_candidates").update({
-            "status": "placed",
-            "approved_at": datetime.now().isoformat(),
-            "notes": f"Confirmed {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        }).eq("id", candidate_id).eq("user_id", user_id).execute()
-
-        # Fetch the candidate to write to trade_log
+        # Fetch and validate before writing anything. This avoids marking a
+        # candidate as placed if the portfolio insert fails.
         resp = (
             supabase._client.table("trade_candidates")
             .select("*")
@@ -305,25 +301,53 @@ async def confirm_candidate(
             .execute()
         )
         c = resp.data
-        if c:
-            trade_row = {
-                "user_id":       user_id,
-                "trade_date":    datetime.now().strftime("%Y-%m-%d"),
-                "ticker":        c["ticker"],
-                "strategy":      c["strategy"],
-                "strike":        c["strike"],
-                "expiry":        c["expiry"],
-                "dte_at_entry":  c["dte"],
-                "entry_price":   c.get("premium"),
-                "contracts":     int(c.get("contracts") or 1),
-                "entry_delta":   c.get("delta"),
-                "iv_percentile": c.get("iv_rank"),
-                "net_premium":   round(float(c.get("premium", 0)) * 100 * int(c.get("contracts") or 1), 2),
-                "candidate_id":  candidate_id,
-            }
-            supabase._client.table("trade_log").insert(trade_row).execute()
+        if not c:
+            raise HTTPException(status_code=404, detail="Candidate not found.")
+        if c.get("status") != "starred":
+            raise HTTPException(status_code=409, detail="Only starred candidates can be confirmed.")
+
+        trade_row = {
+            "user_id":       user_id,
+            "trade_date":    datetime.now().strftime("%Y-%m-%d"),
+            "ticker":        c["ticker"],
+            "strategy":      c["strategy"],
+            "strike":        c["strike"],
+            "expiry":        c["expiry"],
+            "dte_at_entry":  c["dte"],
+            "entry_price":   c.get("premium"),
+            "contracts":     int(c.get("contracts") or 1),
+            "entry_delta":   c.get("delta"),
+            "iv_percentile": c.get("iv_rank"),
+            "net_premium":   round(float(c.get("premium", 0)) * 100 * int(c.get("contracts") or 1), 2),
+            "candidate_id":  candidate_id,
+        }
+
+        insert_resp = supabase._client.table("trade_log").insert(trade_row).execute()
+        inserted_rows = insert_resp.data or []
+        if inserted_rows:
+            inserted_trade_id = inserted_rows[0].get("id")
+
+        try:
+            supabase._client.table("trade_candidates").update({
+                "status": "placed",
+                "approved_at": datetime.now().isoformat(),
+                "notes": f"Confirmed {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            }).eq("id", candidate_id).eq("user_id", user_id).execute()
+        except Exception:
+            rollback = (
+                supabase._client.table("trade_log")
+                .delete()
+                .eq("candidate_id", candidate_id)
+                .eq("user_id", user_id)
+            )
+            if inserted_trade_id:
+                rollback = rollback.eq("id", inserted_trade_id)
+            rollback.execute()
+            raise
 
         return ActionResponse(success=True, message="Trade confirmed and added to portfolio.")
+    except HTTPException:
+        raise
     except Exception as e:
         log.error("confirm_candidate failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to confirm.")
@@ -545,16 +569,19 @@ async def close_trade(
             .select("*")
             .eq("id", trade_id)
             .eq("user_id", user_id)
+            .is_("exit_date", "null")
             .single()
             .execute()
         )
         trade = resp.data
         if not trade:
-            raise HTTPException(status_code=404, detail="Trade not found.")
+            raise HTTPException(status_code=404, detail="Open trade not found.")
 
         entry_price = float(trade.get("entry_price") or 0)
         contracts = int(trade.get("contracts") or 1)
         exit_price = body.exit_price if body.exit_price is not None else 0.0
+        if not math.isfinite(float(exit_price)) or exit_price < 0:
+            raise HTTPException(status_code=422, detail="Exit price must be zero or greater.")
 
         # P&L for short options: (entry - exit) * 100 * contracts
         pnl = round((entry_price - exit_price) * 100 * contracts, 2)

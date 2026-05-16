@@ -19,6 +19,8 @@
 5. Add environment variables:
    - `SUPABASE_URL` = your Supabase URL
    - `SUPABASE_KEY` = your Supabase anon key
+   - `SUPABASE_SERVICE_ROLE_KEY` = your Supabase service role key, server-only
+   - `OPTIONBOT_OWNER_USER_ID` = Supabase `auth.users.id` UUID for legacy Telegram/scanner-owned workflow rows
    - `SUPABASE_JWT_SECRET` = (not needed for ES256 — auto-fetched from JWKS)
    - `FRONTEND_URL` = your Vercel domain (for CORS)
 
@@ -45,6 +47,10 @@ Already configured. Ensure these tables exist (run migrations in order):
 - `migrations/001_create_user_configs.sql`
 - `migrations/002_create_scan_results.sql`
 - `migrations/003_create_subscriptions.sql`
+- `migrations/004_add_user_scoping_to_trade_workflow.sql`
+- `migrations/004a_create_trade_workflow_tables.sql` only if
+  `trade_candidates` or `trade_log` is missing in the target project
+- `migrations/005_harden_user_isolation.sql`
 
 Auth URL configuration also matters for email confirmation and password reset flows:
 
@@ -54,15 +60,22 @@ Auth URL configuration also matters for email confirmation and password reset fl
 
 Recommended production redirect URL:
 
-- `https://optionbot-theta.vercel.app/auth/callback`
+- `https://app.optionbot.org/auth/callback`
 
-Update RLS policies for production:
-```sql
--- Replace Phase 0 open policies with proper user isolation
-DROP POLICY "Allow all access during Phase 0" ON user_configs;
-CREATE POLICY "Users access own configs" ON user_configs
-    FOR ALL USING (auth.uid()::text = user_id);
-```
+If the Vercel preview domain is still used for a controlled preview, keep that
+preview callback separate from the production custom-domain callback.
+
+Migration `005_harden_user_isolation.sql` replaces Phase 0 permissive RLS with
+owner-scoped policies and converts `user_id` fields to UUID FKs. Run it in a
+shadow Supabase project first. Do not apply it to production until:
+
+- `SUPABASE_SERVICE_ROLE_KEY` is configured on backend and worker services
+- legacy `trade_candidates` and `trade_log` rows have valid owner UUIDs
+- any placeholder `user_id` values such as `owner` have been migrated
+- the rollback/restore path is documented for the database layer
+
+For the production promotion checklist and copy/paste precheck SQL, use
+`PRODUCTION_PROMOTION_CHECKLIST.md`.
 
 ## 4. Domain (optional)
 

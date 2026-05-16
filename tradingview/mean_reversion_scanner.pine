@@ -21,7 +21,7 @@
 //     When price is >15% above SMA(200), overbought signals are capped (strong uptrend).
 //     When price is >15% below SMA(200), oversold signals are capped (strong downtrend).
 
-//@version=5
+//@version=6
 indicator("Mean Reversion Scanner — Option Selling", shorttitle="MR Scanner",
      overlay=false, format=format.price, precision=1)
 
@@ -55,6 +55,11 @@ sigStrong = input.int(80, "Strong Signal",       minval=70, maxval=95, group=grp
 sigMod    = input.int(70, "Moderate Signal",     minval=55, maxval=85, group=grp_sig)
 sigModLow = input.int(30, "Moderate Oversold",   minval=15, maxval=45, group=grp_sig)
 sigStrongLow = input.int(20, "Strong Oversold",  minval=5, maxval=30, group=grp_sig)
+
+// --- Score SMA (smoothing line) ---
+grp_sma   = "Score SMA"
+showSma   = input.bool(true, "Show SMA of Score", group=grp_sma)
+smaLen    = input.int(10, "SMA Length",           minval=2, maxval=50, group=grp_sma)
 
 // --- Trend Guard ---
 grp_tg    = "Trend Guard"
@@ -164,6 +169,11 @@ bgcolor(bgColor, title="Signal Background")
 
 // --- Composite Score Line ---
 plot(compositeFinal, "Composite Score", color=color.new(color.white, 0), linewidth=2)
+
+// --- Score SMA Line ---
+scoreSma = ta.sma(compositeFinal, smaLen)
+plot(showSma ? scoreSma : na, "Score SMA",
+     color=color.new(color.orange, 20), linewidth=1, style=plot.style_line)
 
 // --- Threshold Lines ---
 hlineOB2  = hline(sigStrong,    "Strong Overbought", color=color.new(color.red, 50),   linestyle=hline.style_solid)

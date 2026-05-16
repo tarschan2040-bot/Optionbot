@@ -750,7 +750,7 @@ export default function LandingPage() {
   useEffect(() => {
     const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
     if (isLanguageId(savedLanguage)) {
-      setLanguage(savedLanguage);
+      queueMicrotask(() => setLanguage(savedLanguage));
     }
   }, []);
 

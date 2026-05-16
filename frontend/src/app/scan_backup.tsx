@@ -74,7 +74,9 @@ export default function DashboardPage() {
   }, [session]);
 
   useEffect(() => {
-    loadResults();
+    queueMicrotask(() => {
+      void loadResults();
+    });
   }, [loadResults]);
 
   // Cleanup polling on unmount
@@ -88,7 +90,7 @@ export default function DashboardPage() {
   // Filtered + sorted results
   const displayResults = useMemo(() => {
     if (!scanData?.results) return [];
-    let filtered = scanData.results.filter((r) => r.score >= minScore);
+    const filtered = scanData.results.filter((r) => r.score >= minScore);
     filtered.sort((a, b) => {
       const aVal = a[sortKey] ?? 0;
       const bVal = b[sortKey] ?? 0;
@@ -122,9 +124,8 @@ export default function DashboardPage() {
   // Polling
   function startPolling() {
     if (!session) return;
-    const startTime = Date.now();
     timerRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+      setElapsed((current) => current + 1);
     }, 1000);
     pollRef.current = setInterval(async () => {
       try {

@@ -101,7 +101,7 @@ export default function ParametersPage() {
     }
   }, [token]);
 
-  useEffect(() => { loadConfig(); }, [loadConfig]);
+  useEffect(() => { queueMicrotask(() => { void loadConfig(); }); }, [loadConfig]);
 
   async function handleSave() {
     if (!token || !config) return;

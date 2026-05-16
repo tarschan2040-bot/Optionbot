@@ -78,12 +78,29 @@ export default function DetailPage() {
   }, [router, supabase.auth]);
 
   useEffect(() => {
-    if (!session || isNaN(rank)) return;
-    setLoading(true);
-    getScanResultDetail(session.access_token, rank)
-      .then((data) => setResult(data))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    if (!session || Number.isNaN(rank)) return;
+    let isActive = true;
+
+    queueMicrotask(() => {
+      if (!isActive) return;
+      setLoading(true);
+      getScanResultDetail(session.access_token, rank)
+        .then((data) => {
+          if (!isActive) return;
+          setResult(data);
+          setError("");
+        })
+        .catch((err) => {
+          if (isActive) setError(err.message);
+        })
+        .finally(() => {
+          if (isActive) setLoading(false);
+        });
+    });
+
+    return () => {
+      isActive = false;
+    };
   }, [session, rank]);
 
   async function handleStar() {

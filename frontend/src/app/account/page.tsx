@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "@/hooks/useSession";
 import Nav from "@/components/Nav";
 import { createClient } from "@/lib/supabase";
+import { getMe } from "@/lib/api";
 import Link from "next/link";
 
 export default function AccountPage() {
@@ -13,13 +14,28 @@ export default function AccountPage() {
   const [changingPw, setChangingPw] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [pwMsg, setPwMsg] = useState("");
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) setEmail(user.email || "");
     });
   }, [supabase.auth]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getMe(token)
+      .then((data) => {
+        if (!cancelled) setCurrentTier(data.tier || "free");
+      })
+      .catch((err) => {
+        console.error("Failed to load account tier", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   async function handleChangePassword() {
     if (!newPassword || newPassword.length < 6) {
@@ -41,6 +57,9 @@ export default function AccountPage() {
   }
 
   if (!token) return null;
+
+  const isPaidTier = currentTier === "pro" || currentTier === "max";
+  const tierLabel = currentTier.charAt(0).toUpperCase() + currentTier.slice(1);
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -93,21 +112,21 @@ export default function AccountPage() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Subscription</h3>
             <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
-              currentTier === "pro" ? "bg-emerald-900/50 text-emerald-400 border border-emerald-700" : "bg-gray-800 text-gray-400 border border-gray-700"
+              isPaidTier ? "bg-emerald-900/50 text-emerald-400 border border-emerald-700" : "bg-gray-800 text-gray-400 border border-gray-700"
             }`}>
-              {currentTier}
+              {tierLabel}
             </span>
           </div>
           <p className="text-gray-400 text-sm mb-4">
-            {currentTier === "free"
-              ? "You're on the Free plan. Upgrade to Pro for real-time scans, unlimited tickers, and full customisation."
-              : "You're on the Pro plan. Full access to all features."}
+            {isPaidTier
+              ? `You're on the ${tierLabel} plan. Full access is enabled for your current tier.`
+              : "You're on the Free plan. Upgrade to Pro for real-time scans, unlimited tickers, and full customisation."}
           </p>
           <Link
             href="/account/plans"
             className="inline-block px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors"
           >
-            {currentTier === "free" ? "Upgrade to Pro" : "Manage Plan"}
+            {isPaidTier ? "Manage Plan" : "Upgrade to Pro"}
           </Link>
         </section>
       </main>

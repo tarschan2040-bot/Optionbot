@@ -131,6 +131,12 @@ export async function closeTrade(token: string, id: string, exitPrice?: number) 
 
 // ── Health ─────────────────────────────────────────────────────────────
 
+export async function getMe(token: string) {
+  const res = await apiFetch("/me", token);
+  if (!res.ok) throw new Error(`Failed to load account: ${res.status}`);
+  return res.json();
+}
+
 export async function getHealth() {
   const res = await fetch(`${API_URL}/health`);
   return res.json();

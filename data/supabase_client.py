@@ -109,16 +109,22 @@ class SupabaseClient:
         scan_time: datetime,
         top_n: int = 10,
         autostar_threshold: float = 80.0,
+        user_id: Optional[str] = None,
     ) -> Tuple[int, int]:
         """
         Write top N scan opportunities to trade_candidates.
         Candidates scoring >= autostar_threshold are saved as 'starred'.
         All others saved as 'pending'.
+        Requires user_id so scanner writes cannot create unowned SaaS rows.
 
         Returns (total_inserted, auto_starred_count).
         """
         if not self._enabled:
             log.warning("write_candidates: Supabase not enabled — skipping.")
+            return 0, 0
+
+        if not user_id:
+            log.error("write_candidates: user_id required — skipping candidate persistence.")
             return 0, 0
 
         if not opportunities:
@@ -131,7 +137,7 @@ class SupabaseClient:
 
         for o in top:
             status = "starred" if float(o.score) >= autostar_threshold else "pending"
-            row    = self._build_row(o, scan_time, status=status)
+            row    = self._build_row(o, scan_time, status=status, user_id=user_id)
             try:
                 self._client.table(self.TABLE_CANDIDATES).insert(row).execute()
                 inserted += 1
@@ -452,7 +458,7 @@ class SupabaseClient:
         """Star a pending candidate by ID. Sets status = 'starred'."""
         return self._update_status(candidate_id, "starred", user_id=user_id)
 
-    def find_and_star(self, opportunity, scan_time) -> str:
+    def find_and_star(self, opportunity, scan_time, user_id: Optional[str] = None) -> str:
         """
         Find the existing pending row for this opportunity and mark it starred.
         Matches on ticker + strategy + strike + expiry + scan_time (to the minute).
@@ -463,6 +469,9 @@ class SupabaseClient:
           'error'    — operation failed
         """
         if not self._enabled:
+            return "error"
+        if not user_id:
+            log.error("find_and_star: user_id required.")
             return "error"
 
         ticker   = opportunity.contract.ticker
@@ -481,6 +490,7 @@ class SupabaseClient:
                 .eq("strategy", strategy)
                 .eq("strike",   strike)
                 .eq("expiry",   expiry)
+                .eq("user_id",  user_id)
                 .in_("status",  ["pending", "starred"])
                 .order("scan_time", desc=True)
                 .limit(1)
@@ -492,7 +502,7 @@ class SupabaseClient:
                 candidate_id = rows[0]["id"]
                 self._client.table(self.TABLE_CANDIDATES).update(
                     {"status": "starred"}
-                ).eq("id", candidate_id).execute()
+                ).eq("id", candidate_id).eq("user_id", user_id).execute()
                 log.info(
                     "find_and_star: updated existing row %s → starred (%s %s $%.2f)",
                     candidate_id, ticker, strategy, strike,
@@ -504,7 +514,7 @@ class SupabaseClient:
                 "find_and_star: no existing row for %s %s $%.2f — inserting new.",
                 ticker, strategy, strike,
             )
-            row = self._build_row(opportunity, scan_time, status="starred")
+            row = self._build_row(opportunity, scan_time, status="starred", user_id=user_id)
             self._client.table(self.TABLE_CANDIDATES).insert(row).execute()
             return "inserted"
 
@@ -557,16 +567,7 @@ class SupabaseClient:
         placed_time = placed_at or datetime.now()
 
         try:
-            # ── 1. Update trade_candidates status ────────────────────────
-            candidate_update = self._client.table(self.TABLE_CANDIDATES).update({
-                "status": "placed",
-                "notes":  f"Placed at {placed_time.strftime('%Y-%m-%d %H:%M')}",
-            }).eq("id", candidate_id)
-            if user_id:
-                candidate_update = candidate_update.eq("user_id", user_id)
-            candidate_update.execute()
-
-            # ── 2. Fetch full candidate data ─────────────────────────────
+            # ── 1. Fetch full candidate data before mutating status ──────
             candidate_query = (
                 self._client.table(self.TABLE_CANDIDATES)
                 .select("*")
@@ -580,7 +581,7 @@ class SupabaseClient:
                 log.error("place_candidate: candidate %s not found.", candidate_id)
                 return False
 
-            # ── 3. Resolve option fill price ─────────────────────────────
+            # ── 2. Resolve option fill price ─────────────────────────────
             # entry_price is the OPTION premium fill (per share, e.g. $1.25).
             # Use scan premium as fallback — never use stock price here.
             scan_premium = c.get("premium")           # option premium from scan
@@ -593,7 +594,7 @@ class SupabaseClient:
                 else None
             )
 
-            # ── 4. Write to trade_log ────────────────────────────────────
+            # ── 3. Write to trade_log ────────────────────────────────────
             trade_row = {
                 "user_id":       user_id,
                 "trade_date":    placed_time.strftime("%Y-%m-%d"),
@@ -610,7 +611,32 @@ class SupabaseClient:
                 "candidate_id":  candidate_id,
                 # exit_date, exit_price, pnl — left NULL, filled after close
             }
-            self._client.table(self.TABLE_TRADE_LOG).insert(trade_row).execute()
+            insert_resp = self._client.table(self.TABLE_TRADE_LOG).insert(trade_row).execute()
+            inserted_rows = insert_resp.data or []
+            inserted_trade_id = inserted_rows[0].get("id") if inserted_rows else None
+
+            # ── 4. Update trade_candidates status after trade insert ──────
+            try:
+                candidate_update = self._client.table(self.TABLE_CANDIDATES).update({
+                    "status": "placed",
+                    "notes":  f"Placed at {placed_time.strftime('%Y-%m-%d %H:%M')}",
+                }).eq("id", candidate_id)
+                if user_id:
+                    candidate_update = candidate_update.eq("user_id", user_id)
+                candidate_update.execute()
+            except Exception:
+                rollback = (
+                    self._client.table(self.TABLE_TRADE_LOG)
+                    .delete()
+                    .eq("candidate_id", candidate_id)
+                )
+                if user_id:
+                    rollback = rollback.eq("user_id", user_id)
+                if inserted_trade_id:
+                    rollback = rollback.eq("id", inserted_trade_id)
+                rollback.execute()
+                raise
+
             log.info(
                 "Trade placed: %s %s $%.2f  fill=$%.4f  net_premium=$%.2f",
                 c["ticker"], c["strategy"], float(c["strike"]),
@@ -732,7 +758,12 @@ class SupabaseClient:
             return False
 
     @staticmethod
-    def _build_row(opportunity, scan_time: datetime, status: str = "pending") -> dict:
+    def _build_row(
+        opportunity,
+        scan_time: datetime,
+        status: str = "pending",
+        user_id: Optional[str] = None,
+    ) -> dict:
         """
         Map a ScanOpportunity to a trade_candidates table row.
         Verified against core/models.py and trade_candidates SQL schema.
@@ -742,7 +773,7 @@ class SupabaseClient:
         premium    = float(o.contract.mid)
         total_prem = round(premium * 100 * contracts, 2)
 
-        return {
+        row = {
             "ticker":        o.contract.ticker,
             "strategy":      o.strategy,
             "strike":        float(o.contract.strike),
@@ -759,3 +790,6 @@ class SupabaseClient:
             "scan_time":     scan_time.isoformat(),
             "status":        status,
         }
+        if user_id:
+            row["user_id"] = user_id
+        return row

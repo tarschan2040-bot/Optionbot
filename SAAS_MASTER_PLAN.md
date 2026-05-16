@@ -1,5 +1,19 @@
 # OptionBot SaaS Master Plan
 
+Read `AGENTS.md` and `CURRENT_STATE.md` first; no code changes without my approval.
+
+## 2026-05-02 Addendum
+
+Since the original draft of this plan:
+- custom domain is live at `https://app.optionbot.org`
+- custom SMTP is working through Resend
+- signup email confirmation is working through a token-hash `/auth/confirm` route
+- trade workflow isolation for new users has been fixed in active web routes and migration `004`
+- scan and parameter pages are working on the live custom domain
+- current code defines three beta tiers (`Free`, `Pro`, `Max`) while the original launch plan below says two tiers; treat the original tier language as product direction, not deployed billing reality
+
+For the latest operational truth, prefer `CURRENT_STATE.md` over this plan when the two differ.
+
 **Last updated:** April 28, 2026
 **Owner:** KC (cindy.chan@bit.com)
 **Status:** Phase 0 — In progress (Task 0.1 complete)
@@ -83,7 +97,7 @@ These were validated through discussion and peer review:
 
 ### Phase 0 — Prepare the scanner core
 
-**Status:** CODING COMPLETE — Tasks 0.1 + 0.2 + 0.3 done. Task 0.4 scheduled for May 4, 2026.
+**Status:** COMPLETE — All tasks done. Task 0.4 research completed May 4, 2026.
 **Estimated effort:** 1–2 weeks
 **Goal:** Make the scanner callable as a standalone function. No user-facing changes yet.
 
@@ -116,11 +130,12 @@ These were validated through discussion and peer review:
 - ✅ `save_scan_history()` stores `config_hash` in the scan_history DB row
 - ✅ Backward compatible: hash is auto-computed from config if not passed explicitly
 
-**0.4 — Research data licensing (CRITICAL — do this first)** ⏰ SCHEDULED May 4, 2026
-- Scheduled task `data-licensing-research` will run Monday May 4
-- Will research Yahoo Finance ToS, Polygon.io commercial licensing, and alternatives
-- Findings will be written to the "Data licensing status" section below
-- Does not block Phase 1 coding — runs in parallel
+**0.4 — Research data licensing (CRITICAL — do this first)** ✅ DONE (May 4, 2026)
+- ✅ Yahoo Finance ToS reviewed — commercial SaaS use is NOT allowed
+- ✅ Polygon.io (now Massive) Business pricing researched — $1,999+/mo for commercial use
+- ✅ Alternatives evaluated: CBOE DataShop, Tradier, Unusual Whales, Databento, IEX Cloud (shut down)
+- ✅ Findings written to "Data licensing status" section below
+- ⚠️ Manual follow-up required: KC needs to contact Polygon sales and CBOE DataShop for quotes
 
 #### Definition of done for Phase 0
 - `python scheduler.py --once --no-telegram` works
@@ -158,6 +173,32 @@ These were validated through discussion and peer review:
 
 #### API endpoints (FastAPI)
 
+Current route truth lives in `docs/API_ROUTES.md` and should be checked before
+changing frontend API calls or backend route docs.
+
+Mounted from `backend/app.py` as of 2026-05-15:
+
+```
+GET    /health
+GET    /me
+GET    /config
+PUT    /config
+GET    /scan/results
+POST   /scan/trigger
+GET    /scan/status
+GET    /scan/results/{index}
+GET    /scan/history
+GET    /candidates
+POST   /candidates/star
+POST   /candidates/{candidate_id}/confirm
+DELETE /candidates/{candidate_id}
+GET    /candidates/portfolio
+GET    /candidates/portfolio/summary
+POST   /candidates/{trade_id}/close
+```
+
+Original planned endpoints from the early SaaS plan:
+
 ```
 POST   /auth/signup          — Create account
 POST   /auth/login           — Get JWT
@@ -168,6 +209,10 @@ PUT    /config               — Update user's ScannerConfig
 POST   /stripe/webhook       — Stripe subscription events
 GET    /stripe/portal        — Redirect to Stripe customer portal
 ```
+
+`/auth/*` and `/stripe/*` are not mounted by the current FastAPI backend.
+Frontend auth currently uses Supabase directly, with backend JWT verification
+in `backend/auth.py`. Stripe/billing remains planned work.
 
 #### Database schema additions
 
@@ -351,15 +396,106 @@ No additional tiers until real user demand signals what to charge more for.
 
 ## Data licensing status
 
-**Yahoo Finance:** NOT YET VERIFIED for commercial SaaS use. Must read ToS and confirm.
+**Last researched:** May 4, 2026
 
-**Polygon.io:** NOT YET VERIFIED. Retail pricing ($29-199/mo) is for individual use. Commercial/SaaS redistribution requires a separate business license. Must contact sales.
+### Yahoo Finance — NOT ALLOWED for commercial SaaS
 
-**Strategy:** Launch with Yahoo Finance if terms allow. Add paid data source later. If Yahoo disallows commercial use, Polygon becomes a launch requirement, not a Phase 3 item. This is the single biggest risk to the timeline.
+- **Status:** Commercial use is prohibited under Yahoo's Terms of Service.
+- **Key ToS language:** "You may not access or reuse the Services for any commercial purpose." Yahoo explicitly prohibits reproducing, selling, trading, distributing, or exploiting for commercial purposes any portion of the Services, including APIs. Additionally, Yahoo states: "You must not redistribute information displayed on or provided by Yahoo Finance."
+- **yfinance library:** The `yfinance` Python library is an unofficial, third-party scraper — it is "not affiliated, endorsed, or vetted by Yahoo, Inc." and is "intended for research and educational purposes." Using it for a commercial SaaS product carries significant legal risk.
+- **Derived data question:** Yahoo's ToS do not distinguish between raw data redistribution and derived/processed data. The blanket prohibition on commercial use and redistribution likely covers both. This is ambiguous enough that a lawyer might argue derived scores are transformative, but the risk is substantial.
+- **Enforcement risk:** Yahoo could revoke access, rate-limit, or take legal action. The `yfinance` library relies on unofficial endpoints that Yahoo has broken before without notice.
+- **Conclusion:** Do NOT launch a commercial SaaS product on Yahoo Finance data. It is suitable for personal use and development/testing only.
+- **Sources:** [Yahoo API Terms of Use](https://legal.yahoo.com/us/en/yahoo/terms/product-atos/apiforydn/index.html), [Yahoo Terms of Service](https://legal.yahoo.com/xw/en/yahoo/terms/otos/index.html), [yfinance PyPI](https://pypi.org/project/yfinance/)
+
+### Polygon.io (now "Massive") — ALLOWED with Business plan ($1,999+/mo)
+
+- **Status:** Commercial SaaS redistribution is explicitly supported, but only on Business or Enterprise tiers.
+- **Individual plans (Options):** $0–$199/mo. All individual plans are labeled "Individual use" only and marked "Non-pros only" on the Advanced tier. These do NOT permit commercial redistribution or SaaS use.
+- **Business plan (Options):** Pricing is structured per the Stocks Business tier at **$1,999/month** (stocks). Options Business pricing requires contacting sales but is expected to be in the same range. Business plans are labeled "Business use" and include unlimited API calls, real-time data, and no exchange fee surprises.
+- **Enterprise plan:** Custom pricing. Includes SLAs, dedicated Slack channel, implementation support, and a customer success team. Contact sales.
+- **Startup discount:** Polygon/Massive offers startups up to 50% discount on the first year. Contact sales@massive.com to see if OptionBot qualifies.
+- **Options data included:** Greeks, IV, open interest, minute aggregates, WebSockets, snapshot, trades, quotes.
+- **Cost impact:** At $1,999/mo for business use, OptionBot would need ~41 Pro subscribers ($49/mo) just to cover the data cost. This changes the unit economics significantly from the original estimate.
+- **Next steps:**
+  1. Email sales@massive.com to get exact Options Business pricing
+  2. Ask about the startup discount program
+  3. Clarify whether displaying processed scores/rankings (not raw quotes) qualifies for a cheaper tier
+  4. Get written confirmation that their Business license covers SaaS redistribution of derived analytics
+- **Sources:** [Polygon.io Pricing](https://polygon.io/pricing?product=options), [Polygon.io Business Pricing](https://polygon.io/business)
+
+### Alternative providers evaluated
+
+**1. Tradier — UNCLEAR, requires brokerage account**
+- Real-time options data is only available to Tradier Brokerage account holders. No standalone data-only commercial license found.
+- API is free for active traders with a brokerage account, but commercial SaaS redistribution terms are not publicly documented.
+- Best suited for brokerage-attached automation, not standalone SaaS data sourcing.
+- **Next step:** Contact Tradier enterprise sales to ask about SaaS redistribution licensing.
+- **Source:** [Tradier API Docs](https://docs.tradier.com/)
+
+**2. CBOE DataShop (All Access API) — ALLOWED with redistribution license**
+- CBOE explicitly offers a redistribution license for their All Access API.
+- Allows retransmission of real-time, delayed, and historical non-SIP data into client-facing applications, websites, and data feeds.
+- SIP data redistribution requires separate agreements with SIP providers.
+- Pricing is tiered but not publicly listed — must contact CBOE sales (+1 800 307-8979 or via datashop.cboe.com contact form).
+- This is the most "official" source since CBOE is the exchange itself.
+- **Next step:** Contact CBOE DataShop sales for redistribution license pricing. Email via [datashop.cboe.com](https://datashop.cboe.com/) contact form, select "Sales."
+- **Source:** [CBOE All Access API](https://datashop.cboe.com/cboe-all-access-api)
+
+**3. Unusual Whales — ALLOWED at enterprise tier**
+- Offers 100+ API endpoints covering options flow, dark pool, Greeks, etc.
+- Enterprise tier includes redistribution rights — paid tiers unlock higher rate limits and redistribution.
+- Historical options trades data: ~$250/month for full market.
+- Enterprise pricing is custom — must contact sales for a quote.
+- Provides a different type of data (flow/sentiment) vs raw chain data, but could complement a scanner.
+- **Next step:** Contact Unusual Whales enterprise sales for SaaS redistribution pricing.
+- **Source:** [Unusual Whales Enterprise](https://unusualwhales.com/enterprise), [Unusual Whales Pricing](https://unusualwhales.com/pricing)
+
+**4. Databento — ALLOWED but expensive (professional OPRA: ~$2,000+/mo)**
+- Official licensed distributor of options data from all US equity options exchanges.
+- Professional subscribers pay at least $2,000/month for real-time OPRA options data.
+- Exchange redistribution fees apply on top of Databento's own fees.
+- Best suited for institutional-grade needs; likely overkill and overpriced for early-stage SaaS.
+- **Source:** [Databento Options](https://databento.com/options), [Databento Pricing](https://databento.com/pricing)
+
+**5. IEX Cloud — SHUT DOWN (August 2024)**
+- IEX Cloud officially retired on August 31, 2024. Assets sold to Bluesky API.
+- No longer a viable option. Remove from future consideration.
+- **Source:** [IEX Cloud Closure Notice](https://iexcloud.org/)
+
+### Revised strategy recommendation
+
+1. **Yahoo Finance is NOT viable for commercial SaaS.** This is now confirmed. It was the biggest risk item and the answer is clear: do not use it for a paid product.
+
+2. **Polygon.io (Massive) Business plan is the most practical path** but at $1,999/mo it significantly changes the economics. The startup discount (up to 50% off year 1) could bring this to ~$1,000/mo, which needs ~21 Pro subscribers to cover.
+
+3. **CBOE DataShop is the most legitimate option** for options data specifically, since it comes directly from the exchange. Worth getting a quote even if it's more expensive — the licensing clarity may be worth the premium.
+
+4. **Phased approach:**
+   - **Development & beta (now):** Continue using Yahoo Finance / yfinance for internal testing and development only. Do not charge users while using Yahoo data.
+   - **Pre-launch (before accepting payments):** Secure a commercial data license from Polygon/Massive or CBOE. Get the startup discount if possible.
+   - **Post-launch:** Re-evaluate data costs as subscriber count grows. Consider CBOE DataShop if Polygon pricing doesn't scale well.
+
+5. **Unit economics revised:**
+   - Break-even with Polygon Business: ~41 Pro subscribers at $49/mo (without startup discount) or ~21 with 50% discount
+   - Target: reach 50 Pro subscribers within 6 months of launch to achieve healthy margins
+   - Consider whether $49/mo Pro pricing is sufficient, or if $69/mo or $79/mo is needed to absorb data costs
+
+### Manual follow-up actions required
+
+| # | Action | Contact | Priority |
+|---|--------|---------|----------|
+| 1 | Email Polygon/Massive sales for Options Business pricing + startup discount | sales@massive.com | HIGH |
+| 2 | Contact CBOE DataShop for redistribution license pricing | [datashop.cboe.com](https://datashop.cboe.com/) contact form → Sales | HIGH |
+| 3 | Contact Unusual Whales enterprise for SaaS redistribution quote | [unusualwhales.com/enterprise](https://unusualwhales.com/enterprise) | MEDIUM |
+| 4 | Consult a lawyer on derived-data vs raw-data redistribution distinctions | — | MEDIUM |
+| 5 | Re-evaluate Pro tier pricing ($49 vs $69 vs $79) given data costs | — | MEDIUM |
 
 ---
 
 ## Unit economics target
+
+*Updated May 4, 2026 — Yahoo Finance is not viable for commercial use. Data costs revised.*
 
 | Item | Monthly cost | Notes |
 |------|-------------|-------|
@@ -367,14 +503,14 @@ No additional tiers until real user demand signals what to charge more for.
 | Railway/Render (backend) | $20–40 | Single server with worker |
 | Supabase | $25 | Pro plan (8GB, 50K auth users) |
 | SendGrid | $0–20 | Free tier: 100 emails/day |
-| Data source | $0–200 | Yahoo = free. Polygon = $29-199+ |
+| Data source (Polygon Business) | $1,000–2,000 | $1,999/mo list; ~$1,000/mo with startup discount |
 | Stripe fees | 2.9% + $0.30/txn | Standard |
-| **Total (Yahoo)** | **~$65/mo** | |
-| **Total (Polygon)** | **~$265/mo** | |
+| **Total (with startup discount)** | **~$1,065/mo** | |
+| **Total (without discount)** | **~$2,065/mo** | |
 
-**Break-even:** 2 Pro subscribers at $49/mo covers Yahoo-based infrastructure. 6 Pro subscribers covers Polygon-based infrastructure.
+**Break-even:** ~21 Pro subscribers at $49/mo (with startup discount) or ~42 without discount. If Pro pricing is raised to $69/mo, break-even drops to ~15 or ~30 respectively.
 
-**Target margin:** At 50 Pro users ($2,450 MRR), infrastructure costs ~$100-300/mo = 88-96% gross margin.
+**Target margin:** At 50 Pro users ($2,450 MRR at $49/mo), infrastructure costs ~$1,065-2,065/mo = 16-57% gross margin. At $69/mo pricing, 50 users = $3,450 MRR = 40-69% gross margin. Margins improve significantly beyond 100 subscribers since data cost is fixed.
 
 ---
 
@@ -406,6 +542,9 @@ No additional tiers until real user demand signals what to charge more for.
 | 2026-04-28 | Data licensing validation is Phase 0 priority | Commercial redistribution rights must be confirmed before building. Reviewer flagged as biggest risk. |
 | 2026-04-28 | Backend API first, frontend after | Validate endpoints and data flow before building UI. Stripe deferred to end of Phase 1. |
 | 2026-04-28 | FastAPI backend lives in `backend/` subdirectory | Imports scanner core from project root. Clean separation: scanner = library, backend = web layer. |
+| 2026-05-04 | Yahoo Finance data cannot be used for commercial SaaS | Yahoo ToS explicitly prohibits commercial use and redistribution. yfinance is unofficial and unsuitable for production SaaS. |
+| 2026-05-04 | Polygon.io (Massive) Business plan is primary commercial data path | Individual plans are "Individual use" only. Business tier ($1,999+/mo) required for SaaS. Startup discount (up to 50%) available. |
+| 2026-05-04 | CBOE DataShop is secondary commercial data option | Exchange-direct data with explicit redistribution license. Pricing requires sales contact. Most legally clean option. |
 
 ---
 

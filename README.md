@@ -1,5 +1,9 @@
 # 📊 Sell Option Scanner
 
+Read `AGENTS.md` and `CURRENT_STATE.md` first; no code changes without my approval.
+
+For AI-assisted development, read `AGENTS.md` and `CURRENT_STATE.md` before making changes.
+
 A modular, Greeks-aware scanner for **Covered Calls** and **Cash-Secured Puts** on US stocks,
 with pluggable data sources (Yahoo Finance free, or Interactive Brokers live).
 
@@ -55,7 +59,8 @@ pip install -r requirements.txt
 ```bash
 cp env.example .env
 # Edit .env with your Telegram bot token & chat ID (required)
-# Optionally add SUPABASE_URL/KEY for trade tracking
+# Add SUPABASE_URL, SUPABASE_KEY, and OPTIONBOT_OWNER_USER_ID for trade tracking
+# Add SUPABASE_SERVICE_ROLE_KEY for the SaaS backend/worker after RLS hardening
 ```
 
 ### 3. Test Without Live Data (Dry Run)

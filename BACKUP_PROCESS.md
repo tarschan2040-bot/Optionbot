@@ -20,11 +20,15 @@ Exclude transient or generated files where practical:
 - `.git/`
 - previous `backups/`
 - `__pycache__/`
+- `*/__pycache__/`
 - `.pytest_cache/`
 - `frontend/.next/`
 - `frontend/node_modules/`
 - `bot.log`
 - `bot.pid`
+- `.env`
+- `.env.*`
+- `frontend/.env.local`
 
 ## Minimal Changelog Template
 
@@ -54,13 +58,19 @@ zip_path="backups/optionbot_backup_${ts}.zip"
 changelog_path="backups/optionbot_backup_${ts}_changelog.md"
 
 zip -r "$zip_path" . \
-  -x "./backups/*" "./.git/*" "./__pycache__/*" "./.pytest_cache/*" \
-     "./bot.log" "./bot.pid" "./frontend/.next/*" "./frontend/node_modules/*" \
-     "./backend/__pycache__/*" "./core/__pycache__/*" "./data/__pycache__/*" \
-     "./output/__pycache__/*" "./strategies/__pycache__/*"
+  -x "backups/*" ".git/*" "__pycache__/*" ".pytest_cache/*" \
+     "*/__pycache__/*" \
+     "bot.log" "bot.pid" "frontend/.next/*" "frontend/node_modules/*" \
+     ".env" ".env.*" "frontend/.env.local" \
+     "backend/__pycache__/*" "core/__pycache__/*" "data/__pycache__/*" \
+     "output/__pycache__/*" "strategies/__pycache__/*"
 ```
 
 Then create the matching changelog markdown file.
+
+Important: keep the exclude patterns quoted, and do not prefix them with `./`.
+Zip archive entries are stored without leading `./`, so leading-dot-slash
+patterns may fail to exclude generated folders.
 
 ## Current Latest Backup
 
@@ -69,3 +79,17 @@ At the time this file was added, the latest backup created for current work was:
 - `backups/optionbot_backup_20260502_182441.zip`
 - `backups/optionbot_backup_20260502_182441_changelog.md`
 
+Latest documentation-workflow backup:
+
+- `backups/optionbot_backup_20260515_172149.zip`
+- `backups/optionbot_backup_20260515_172149_changelog.md`
+
+Latest code/docs promotion-prep backup:
+
+- `backups/optionbot_backup_20260516_125442.zip`
+- `backups/optionbot_backup_20260516_125442_changelog.md`
+- `backups/optionbot_promotion_20260516_125442_rollback_record.md`
+
+Note: the 20260510 backup is intentionally preserved as a restore point, but it
+is larger than the minimal convention because the first zip invocation included
+generated/Git/dependency folders before this instruction was corrected.

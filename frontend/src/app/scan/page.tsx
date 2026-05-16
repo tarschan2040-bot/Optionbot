@@ -46,7 +46,7 @@ export default function ScanPage() {
     finally { setLoading(false); }
   }, [token]);
 
-  useEffect(() => { loadResults(); }, [loadResults]);
+  useEffect(() => { queueMicrotask(() => { void loadResults(); }); }, [loadResults]);
   useEffect(() => { return () => { if (pollRef.current) clearInterval(pollRef.current); if (timerRef.current) clearInterval(timerRef.current); }; }, []);
 
   // Tier info
@@ -58,7 +58,7 @@ export default function ScanPage() {
 
   const displayResults = useMemo(() => {
     if (!scanData?.results) return [];
-    let filtered = scanData.results.filter((r) => r.score >= minScore);
+    const filtered = scanData.results.filter((r) => r.score >= minScore);
     filtered.sort((a, b) => {
       const aV = a[sortKey] ?? 0, bV = b[sortKey] ?? 0;
       if (typeof aV === "string" && typeof bV === "string") return sortDir === "asc" ? aV.localeCompare(bV) : bV.localeCompare(aV);
@@ -75,8 +75,7 @@ export default function ScanPage() {
 
   function startPolling() {
     if (!token) return;
-    const t0 = Date.now();
-    timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    timerRef.current = setInterval(() => setElapsed((current) => current + 1), 1000);
     pollRef.current = setInterval(async () => {
       try { const s = await getScanStatus(token); if (!s.running) { stopPolling(); setScanning(false); setScanMessage("Scan complete!"); loadResults(); setTimeout(() => setScanMessage(""), 3000); } } catch {}
     }, 5000);
