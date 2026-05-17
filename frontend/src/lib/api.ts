@@ -5,6 +5,19 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+async function publicApiFetch(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  return fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+}
+
 /**
  * Fetch wrapper that injects the auth token from Supabase session.
  */
@@ -114,6 +127,30 @@ export async function getPortfolio(token: string) {
   return res.json();
 }
 
+export async function getClosedPortfolio(token: string) {
+  const res = await apiFetch("/candidates/portfolio/closed", token);
+  if (!res.ok) throw new Error(`Failed to load closed portfolio: ${res.status}`);
+  return res.json();
+}
+
+export async function getPortfolioPosition(token: string, id: string) {
+  const res = await apiFetch(`/candidates/portfolio/${id}`, token);
+  if (!res.ok) throw new Error(`Failed to load position: ${res.status}`);
+  return res.json();
+}
+
+export async function getPortfolioOptionChart(
+  token: string,
+  id: string,
+  interval = "15m",
+  range = "5d"
+) {
+  const params = new URLSearchParams({ interval, range });
+  const res = await apiFetch(`/candidates/portfolio/${id}/option-chart?${params.toString()}`, token);
+  if (!res.ok) throw new Error(`Failed to load option chart: ${res.status}`);
+  return res.json();
+}
+
 export async function getPortfolioSummary(token: string) {
   const res = await apiFetch("/candidates/portfolio/summary", token);
   if (!res.ok) throw new Error(`Failed to load summary: ${res.status}`);
@@ -126,6 +163,93 @@ export async function closeTrade(token: string, id: string, exitPrice?: number) 
     body: JSON.stringify({ exit_price: exitPrice ?? 0 }),
   });
   if (!res.ok) throw new Error(`Failed to close: ${res.status}`);
+  return res.json();
+}
+
+export async function updatePortfolioPosition(
+  token: string,
+  id: string,
+  data: { trade_date?: string; entry_price?: number; contracts?: number }
+) {
+  const res = await apiFetch(`/candidates/portfolio/${id}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to update position: ${res.status}`);
+  return res.json();
+}
+
+export async function deletePortfolioPosition(token: string, id: string) {
+  const res = await apiFetch(`/candidates/portfolio/${id}`, token, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Failed to delete position: ${res.status}`);
+  return res.json();
+}
+
+export async function rollPortfolioPosition(
+  token: string,
+  id: string,
+  data: {
+    buyback_price: number;
+    ticker: string;
+    strategy: string;
+    strike: number;
+    expiry: string;
+    entry_price: number;
+    contracts: number;
+    entry_delta?: number;
+  }
+) {
+  const res = await apiFetch(`/candidates/portfolio/${id}/roll`, token, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to roll position: ${res.status}`);
+  return res.json();
+}
+
+// ── Billing ─────────────────────────────────────────────────────────────
+
+export async function createCheckoutSession(
+  token: string,
+  tier: "pro" | "max",
+  billingPeriod: "monthly" | "annual"
+) {
+  const res = await apiFetch("/billing/checkout", token, {
+    method: "POST",
+    body: JSON.stringify({ tier, billing_period: billingPeriod }),
+  });
+  if (!res.ok) throw new Error(`Failed to start checkout: ${res.status}`);
+  return res.json();
+}
+
+export async function createPortalSession(token: string) {
+  const res = await apiFetch("/billing/portal", token, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to open billing portal: ${res.status}`);
+  return res.json();
+}
+
+// ── Public lead capture ─────────────────────────────────────────────────
+
+export async function subscribeMarketUpdates(email: string) {
+  const res = await publicApiFetch("/public/newsletter", {
+    method: "POST",
+    body: JSON.stringify({ email, source: "landing_page" }),
+  });
+  if (!res.ok) throw new Error(`Failed to subscribe: ${res.status}`);
+  return res.json();
+}
+
+export async function sendContactMessage(data: {
+  first_name: string;
+  last_name: string;
+  email: string;
+  message: string;
+}) {
+  const res = await publicApiFetch("/public/contact", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to send message: ${res.status}`);
   return res.json();
 }
 

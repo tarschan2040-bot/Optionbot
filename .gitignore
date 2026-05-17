@@ -1,5 +1,6 @@
 # ── Secrets (NEVER commit) ────────────────────────────
 .env
+.env.*
 .env.shadow
 .env.local
 .env.production
@@ -38,3 +39,4 @@ scan_results_*.csv
 
 # ── Archives ──────────────────────────────────────────
 archive/
+backups/*.zip

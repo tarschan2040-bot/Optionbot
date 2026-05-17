@@ -14,7 +14,10 @@ Portfolio page:   GET  /candidates/portfolio       — active trades with live m
 """
 import logging
 import math
-from datetime import datetime, timedelta
+import json
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,6 +28,7 @@ from data.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+_OPTION_CHART_CACHE: dict[tuple[str, str, str], List["OptionChartPoint"]] = {}
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────
@@ -64,6 +68,39 @@ class CloseRequest(BaseModel):
     exit_price: Optional[float] = None  # option price at close; None = expired worthless ($0)
 
 
+class UpdateTradeRequest(BaseModel):
+    trade_date: Optional[str] = None
+    entry_price: Optional[float] = None
+    contracts: Optional[int] = None
+
+
+class RollRequest(BaseModel):
+    buyback_price: float
+    ticker: str
+    strategy: str
+    strike: float
+    expiry: str
+    entry_price: float
+    contracts: int = 1
+    entry_delta: Optional[float] = None
+
+
+class OptionChartPoint(BaseModel):
+    timestamp: str
+    close: float
+    volume: Optional[int] = None
+
+
+class OptionChartResponse(BaseModel):
+    symbol: str
+    interval: str
+    range: str
+    delayed: bool = True
+    stale: bool = False
+    points: List[OptionChartPoint] = []
+    error: Optional[str] = None
+
+
 class ActionResponse(BaseModel):
     success: bool
     message: str
@@ -89,9 +126,22 @@ class PortfolioPosition(BaseModel):
     # P&L
     pnl_dollars: Optional[float] = None
     pnl_percent: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    cost_basis: float = 0
+    average_price: float = 0
+    market_value: Optional[float] = None
+    portfolio_percent: Optional[float] = None
+    today_change_pct: Optional[float] = None
     # Metadata
     opened_at: Optional[str] = None
     contracts: int = 1
+    same_contracts: int = 1
+    option_type: str = "Call"
+    option_label: str = ""
+    exit_date: Optional[str] = None
+    exit_price: Optional[float] = None
+    status: str = "open"
+    is_expired: bool = False
 
 
 class PortfolioSummary(BaseModel):
@@ -223,6 +273,196 @@ def _fetch_live_data(positions: list) -> dict:
         log.error("yfinance not installed — cannot fetch live data")
 
     return result
+
+
+def _option_type_for_strategy(strategy: str) -> str:
+    return "Call" if strategy == "COVERED_CALL" else "Put"
+
+
+def _contract_key(ticker: str, strategy: str, strike: float, expiry: str) -> tuple:
+    return (ticker.upper(), strategy, round(float(strike or 0), 4), str(expiry or ""))
+
+
+def _format_strike(strike: float) -> str:
+    if float(strike).is_integer():
+        return str(int(strike))
+    return f"{strike:.2f}".rstrip("0").rstrip(".")
+
+
+def _format_option_label(ticker: str, expiry: str, strike: float, strategy: str) -> str:
+    try:
+        exp_date = datetime.fromisoformat(str(expiry)).date()
+        expiry_label = exp_date.strftime("%b %d '%y").upper()
+    except Exception:
+        expiry_label = str(expiry)
+    return f"{ticker.upper()} {expiry_label} {_format_strike(strike)} {_option_type_for_strategy(strategy)}"
+
+
+def _dte_now(expiry_str: str) -> int:
+    if not expiry_str:
+        return 0
+    try:
+        from datetime import date
+        exp_date = date.fromisoformat(str(expiry_str))
+        return max(0, (exp_date - datetime.now().date()).days)
+    except Exception:
+        return 0
+
+
+def _expiry_date(expiry_str: str):
+    try:
+        from datetime import date
+        return date.fromisoformat(str(expiry_str))
+    except Exception:
+        return None
+
+
+def _is_expired(expiry_str: str) -> bool:
+    exp_date = _expiry_date(expiry_str)
+    return bool(exp_date and exp_date < datetime.now().date())
+
+
+def _yahoo_option_symbol(ticker: str, expiry: str, strike: float, strategy: str) -> str:
+    exp_date = _expiry_date(expiry)
+    if not exp_date:
+        raise ValueError("Invalid expiry date.")
+    option_code = "C" if _option_type_for_strategy(strategy) == "Call" else "P"
+    strike_code = int(round(float(strike) * 1000))
+    return f"{ticker.upper().strip()}{exp_date.strftime('%y%m%d')}{option_code}{strike_code:08d}"
+
+
+def _fetch_option_chart(symbol: str, interval: str, range_value: str) -> List[OptionChartPoint]:
+    url = (
+        "https://query1.finance.yahoo.com/v8/finance/chart/"
+        f"{urllib.parse.quote(symbol)}?interval={urllib.parse.quote(interval)}&range={urllib.parse.quote(range_value)}"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+
+    chart = data.get("chart", {})
+    if chart.get("error"):
+        raise ValueError(chart["error"].get("description") or "Option chart unavailable.")
+
+    result = (chart.get("result") or [None])[0]
+    if not result:
+        return []
+
+    timestamps = result.get("timestamp") or []
+    quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
+
+    points: List[OptionChartPoint] = []
+    for idx, ts in enumerate(timestamps):
+        if idx >= len(closes) or closes[idx] is None:
+            continue
+        volume = volumes[idx] if idx < len(volumes) else None
+        points.append(OptionChartPoint(
+            timestamp=datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat(),
+            close=round(float(closes[idx]), 4),
+            volume=int(volume) if volume is not None else None,
+        ))
+
+    return points
+
+
+def _same_contract_counts(trades: list) -> dict:
+    counts = {}
+    for t in trades:
+        key = _contract_key(
+            t.get("ticker") or "",
+            t.get("strategy") or "",
+            float(t.get("strike") or 0),
+            t.get("expiry") or "",
+        )
+        counts[key] = counts.get(key, 0) + int(t.get("contracts") or 1)
+    return counts
+
+
+def _total_cost_basis(trades: list) -> float:
+    return sum(
+        float(t.get("entry_price") or 0) * 100 * int(t.get("contracts") or 1)
+        for t in trades
+    )
+
+
+def _position_from_trade(
+    trade: dict,
+    same_contracts: dict,
+    total_cost_basis: float,
+    live_data: Optional[dict] = None,
+) -> PortfolioPosition:
+    ticker = trade.get("ticker") or ""
+    strike = float(trade.get("strike") or 0)
+    expiry_str = trade.get("expiry") or ""
+    strategy = trade.get("strategy") or ""
+    contracts = int(trade.get("contracts") or 1)
+    entry_premium = float(trade.get("entry_price") or 0)
+    cost_basis = round(entry_premium * 100 * contracts, 2)
+    is_closed = bool(trade.get("exit_date"))
+
+    ticker_data = (live_data or {}).get(ticker, {})
+    stock_price = ticker_data.get("price")
+    day_change = ticker_data.get("day_change_pct")
+    opt_data = ticker_data.get("options", {}).get(f"{strike}-{expiry_str}", {})
+
+    current_option_price = opt_data.get("mid")
+    current_iv = opt_data.get("iv")
+    current_delta = opt_data.get("delta")
+    current_theta = opt_data.get("theta")
+
+    exit_price = trade.get("exit_price")
+    exit_price_value = float(exit_price) if exit_price is not None else None
+    realized_pnl = float(trade["pnl"]) if trade.get("pnl") is not None else None
+    is_expired = (not is_closed) and _is_expired(expiry_str)
+
+    if is_closed:
+        market_value = round(exit_price_value * 100 * contracts, 2) if exit_price_value is not None else None
+        pnl_dollars = round(realized_pnl, 2) if realized_pnl is not None else None
+        pnl_percent = round(realized_pnl / cost_basis * 100, 2) if realized_pnl is not None and cost_basis > 0 else None
+    else:
+        market_value = round(current_option_price * 100 * contracts, 2) if current_option_price is not None else None
+        pnl_dollars = None
+        pnl_percent = None
+        if current_option_price is not None and entry_premium > 0:
+            pnl_dollars = round((entry_premium - current_option_price) * 100 * contracts, 2)
+            pnl_percent = round((entry_premium - current_option_price) / entry_premium * 100, 2)
+
+    return PortfolioPosition(
+        id=trade["id"],
+        ticker=ticker,
+        strategy=strategy,
+        strike=strike,
+        expiry=expiry_str,
+        dte_at_entry=int(trade.get("dte_at_entry") or 0),
+        dte_now=0 if is_closed else _dte_now(expiry_str),
+        entry_premium=entry_premium,
+        entry_delta=float(trade.get("entry_delta") or 0),
+        current_stock_price=stock_price,
+        current_option_price=current_option_price,
+        current_delta=current_delta,
+        current_iv=current_iv,
+        current_theta=current_theta,
+        stock_day_change_pct=day_change,
+        pnl_dollars=pnl_dollars,
+        pnl_percent=pnl_percent,
+        realized_pnl=round(realized_pnl, 2) if realized_pnl is not None else None,
+        cost_basis=cost_basis,
+        average_price=entry_premium,
+        market_value=market_value,
+        portfolio_percent=round(cost_basis / total_cost_basis * 100, 2) if total_cost_basis > 0 else None,
+        today_change_pct=day_change,
+        opened_at=trade.get("trade_date"),
+        contracts=contracts,
+        same_contracts=same_contracts.get(_contract_key(ticker, strategy, strike, expiry_str), contracts),
+        option_type=_option_type_for_strategy(strategy),
+        option_label=_format_option_label(ticker, expiry_str, strike, strategy),
+        exit_date=trade.get("exit_date"),
+        exit_price=exit_price_value,
+        status="closed" if is_closed else "open",
+        is_expired=is_expired,
+    )
 
 
 # ── Candidates endpoints ──────────────────────────────────────────────────
@@ -407,74 +647,46 @@ async def get_portfolio(
 
         # Fetch live market data
         live_data = _fetch_live_data(positions)
+        same_contracts = _same_contract_counts(trades)
+        total_cost_basis = _total_cost_basis(trades)
 
-        # Build response
-        result = []
-        today = datetime.now().date()
-        for t in trades:
-            ticker = t.get("ticker") or ""
-            strike = float(t.get("strike") or 0)
-            expiry_str = t.get("expiry") or ""
-            strategy = t.get("strategy") or ""
-
-            # Calculate current DTE
-            dte_now = 0
-            if expiry_str:
-                try:
-                    from datetime import date
-                    exp_date = date.fromisoformat(expiry_str)
-                    dte_now = max(0, (exp_date - today).days)
-                except Exception:
-                    dte_now = 0
-
-            # Live data
-            ticker_data = live_data.get(ticker, {})
-            stock_price = ticker_data.get("price")
-            day_change = ticker_data.get("day_change_pct")
-
-            pos_key = f"{strike}-{expiry_str}"
-            opt_data = ticker_data.get("options", {}).get(pos_key, {})
-            current_option_price = opt_data.get("mid")
-            current_iv = opt_data.get("iv")
-            current_delta = opt_data.get("delta")
-            current_theta = opt_data.get("theta")
-
-            # P&L calculation (for short options: profit = entry - current)
-            entry_premium = float(t.get("entry_price") or 0)
-            contracts = int(t.get("contracts") or 1)
-            pnl_dollars = None
-            pnl_percent = None
-            if current_option_price is not None and entry_premium > 0:
-                pnl_dollars = round((entry_premium - current_option_price) * 100 * contracts, 2)
-                pnl_percent = round((entry_premium - current_option_price) / entry_premium * 100, 2)
-
-            result.append(PortfolioPosition(
-                id=t["id"],
-                ticker=ticker,
-                strategy=strategy,
-                strike=strike,
-                expiry=expiry_str,
-                dte_at_entry=int(t.get("dte_at_entry") or 0),
-                dte_now=dte_now,
-                entry_premium=entry_premium,
-                entry_delta=float(t.get("entry_delta") or 0),
-                current_stock_price=stock_price,
-                current_option_price=current_option_price,
-                current_delta=current_delta,
-                current_iv=current_iv,
-                current_theta=current_theta,
-                stock_day_change_pct=day_change,
-                pnl_dollars=pnl_dollars,
-                pnl_percent=pnl_percent,
-                opened_at=t.get("trade_date"),
-                contracts=contracts,
-            ))
-
-        return result
+        return [
+            _position_from_trade(t, same_contracts, total_cost_basis, live_data=live_data)
+            for t in trades
+        ]
 
     except Exception as e:
         log.error("get_portfolio failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to fetch portfolio.")
+
+
+@router.get("/portfolio/closed", response_model=List[PortfolioPosition])
+async def get_closed_portfolio(
+    user_id: str = Depends(get_current_user),
+):
+    """Get closed trades including expired-worthless or assigned positions once recorded."""
+    supabase = _get_supabase()
+    try:
+        resp = (
+            supabase._client.table("trade_log")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("exit_date", desc=True)
+            .execute()
+        )
+        trades = [t for t in (resp.data or []) if t.get("exit_date")]
+        if not trades:
+            return []
+
+        same_contracts = _same_contract_counts(trades)
+        total_cost_basis = _total_cost_basis(trades)
+        return [
+            _position_from_trade(t, same_contracts, total_cost_basis)
+            for t in trades
+        ]
+    except Exception as e:
+        log.error("get_closed_portfolio failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch closed portfolio.")
 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummary)
@@ -552,6 +764,283 @@ async def get_portfolio_summary(
     except Exception as e:
         log.error("get_portfolio_summary failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to fetch summary.")
+
+
+@router.get("/portfolio/{trade_id}", response_model=PortfolioPosition)
+async def get_portfolio_position(
+    trade_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Get one position with live market data for open trades."""
+    supabase = _get_supabase()
+    try:
+        resp = (
+            supabase._client.table("trade_log")
+            .select("*")
+            .eq("id", trade_id)
+            .eq("user_id", user_id)
+            .single()
+            .execute()
+        )
+        trade = resp.data
+        if not trade:
+            raise HTTPException(status_code=404, detail="Trade not found.")
+
+        all_resp = (
+            supabase._client.table("trade_log")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        user_trades = all_resp.data or [trade]
+        same_contracts = _same_contract_counts(user_trades)
+        total_cost_basis = _total_cost_basis(user_trades)
+
+        live_data = {}
+        if not trade.get("exit_date") and trade.get("ticker") and trade.get("expiry"):
+            live_data = _fetch_live_data([{
+                "ticker": trade["ticker"],
+                "strategy": trade.get("strategy") or "",
+                "strike": float(trade.get("strike") or 0),
+                "expiry": trade["expiry"],
+            }])
+
+        return _position_from_trade(trade, same_contracts, total_cost_basis, live_data=live_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("get_portfolio_position failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch position.")
+
+
+@router.get("/portfolio/{trade_id}/option-chart", response_model=OptionChartResponse)
+async def get_portfolio_option_chart(
+    trade_id: str,
+    interval: str = Query("15m"),
+    range: str = Query("5d"),
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Best-effort delayed option price chart for the exact contract.
+
+    Yahoo option chart availability varies by contract and market hours. Return
+    an empty point list with an error string instead of failing the edit page.
+    """
+    allowed_intervals = {"5m", "15m", "30m", "1h", "1d"}
+    allowed_ranges = {"1d", "5d", "1mo", "3mo", "6mo", "1y"}
+    if interval not in allowed_intervals:
+        raise HTTPException(status_code=422, detail="Unsupported chart interval.")
+    if range not in allowed_ranges:
+        raise HTTPException(status_code=422, detail="Unsupported chart range.")
+
+    supabase = _get_supabase()
+    resp = (
+        supabase._client.table("trade_log")
+        .select("ticker, strategy, strike, expiry")
+        .eq("id", trade_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    trade = resp.data
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found.")
+
+    try:
+        symbol = _yahoo_option_symbol(
+            trade.get("ticker") or "",
+            trade.get("expiry") or "",
+            float(trade.get("strike") or 0),
+            trade.get("strategy") or "",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        points = _fetch_option_chart(symbol, interval, range)
+        cache_key = (symbol, interval, range)
+        if points:
+            _OPTION_CHART_CACHE[cache_key] = points
+        else:
+            cached = _OPTION_CHART_CACHE.get(cache_key)
+            if cached:
+                return OptionChartResponse(
+                    symbol=symbol,
+                    interval=interval,
+                    range=range,
+                    points=cached,
+                    stale=True,
+                    error="Using the last available chart because Yahoo returned no new bars.",
+                )
+        return OptionChartResponse(
+            symbol=symbol,
+            interval=interval,
+            range=range,
+            points=points,
+            error=None if points else "No option chart bars returned for this contract.",
+        )
+    except Exception as e:
+        log.warning("option chart fetch failed for %s: %s", symbol, e)
+        cached = _OPTION_CHART_CACHE.get((symbol, interval, range))
+        if cached:
+            return OptionChartResponse(
+                symbol=symbol,
+                interval=interval,
+                range=range,
+                points=cached,
+                stale=True,
+                error="Using the last available chart because Yahoo is unavailable right now.",
+            )
+        return OptionChartResponse(
+            symbol=symbol,
+            interval=interval,
+            range=range,
+            points=[],
+            error="Option chart is unavailable for this contract right now.",
+        )
+
+
+@router.patch("/portfolio/{trade_id}", response_model=ActionResponse)
+async def update_portfolio_position(
+    trade_id: str,
+    body: UpdateTradeRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Edit mutable trade fields for an open position."""
+    updates = {}
+    if body.trade_date is not None:
+        try:
+            datetime.fromisoformat(str(body.trade_date)).date()
+        except Exception:
+            raise HTTPException(status_code=422, detail="Entry date must be a valid date.")
+        updates["trade_date"] = str(body.trade_date)
+    if body.entry_price is not None:
+        if not math.isfinite(float(body.entry_price)) or body.entry_price < 0:
+            raise HTTPException(status_code=422, detail="Entry price must be zero or greater.")
+        updates["entry_price"] = float(body.entry_price)
+    if body.contracts is not None:
+        if body.contracts < 1:
+            raise HTTPException(status_code=422, detail="Contracts must be at least 1.")
+        updates["contracts"] = int(body.contracts)
+
+    if not updates:
+        raise HTTPException(status_code=422, detail="No editable fields supplied.")
+
+    if "entry_price" in updates or "contracts" in updates:
+        resp = (
+            _get_supabase()._client.table("trade_log")
+            .select("entry_price, contracts")
+            .eq("id", trade_id)
+            .eq("user_id", user_id)
+            .is_("exit_date", "null")
+            .single()
+            .execute()
+        )
+        trade = resp.data
+        if not trade:
+            raise HTTPException(status_code=404, detail="Open trade not found.")
+        entry_price = updates.get("entry_price", float(trade.get("entry_price") or 0))
+        contracts = updates.get("contracts", int(trade.get("contracts") or 1))
+        updates["net_premium"] = round(float(entry_price) * 100 * int(contracts), 2)
+
+    try:
+        _get_supabase()._client.table("trade_log").update(updates).eq("id", trade_id).eq(
+            "user_id", user_id
+        ).is_("exit_date", "null").execute()
+        return ActionResponse(success=True, message="Position updated.")
+    except Exception as e:
+        log.error("update_portfolio_position failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to update position.")
+
+
+@router.delete("/portfolio/{trade_id}", response_model=ActionResponse)
+async def delete_portfolio_position(
+    trade_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Delete an open trade that was added by mistake."""
+    try:
+        _get_supabase()._client.table("trade_log").delete().eq("id", trade_id).eq(
+            "user_id", user_id
+        ).is_("exit_date", "null").execute()
+        return ActionResponse(success=True, message="Position deleted.")
+    except Exception as e:
+        log.error("delete_portfolio_position failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to delete position.")
+
+
+@router.post("/portfolio/{trade_id}/roll", response_model=ActionResponse)
+async def roll_portfolio_position(
+    trade_id: str,
+    body: RollRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Close an open position and create the rolled replacement contract."""
+    if not math.isfinite(float(body.buyback_price)) or body.buyback_price < 0:
+        raise HTTPException(status_code=422, detail="Buyback price must be zero or greater.")
+    if not math.isfinite(float(body.entry_price)) or body.entry_price < 0:
+        raise HTTPException(status_code=422, detail="New entry price must be zero or greater.")
+    if body.contracts < 1:
+        raise HTTPException(status_code=422, detail="Contracts must be at least 1.")
+
+    supabase = _get_supabase()
+    inserted_trade_id = None
+    try:
+        resp = (
+            supabase._client.table("trade_log")
+            .select("*")
+            .eq("id", trade_id)
+            .eq("user_id", user_id)
+            .is_("exit_date", "null")
+            .single()
+            .execute()
+        )
+        old_trade = resp.data
+        if not old_trade:
+            raise HTTPException(status_code=404, detail="Open trade not found.")
+
+        old_entry = float(old_trade.get("entry_price") or 0)
+        old_contracts = int(old_trade.get("contracts") or 1)
+        pnl = round((old_entry - body.buyback_price) * 100 * old_contracts, 2)
+
+        new_row = {
+            "user_id": user_id,
+            "trade_date": datetime.now().strftime("%Y-%m-%d"),
+            "ticker": body.ticker.upper().strip(),
+            "strategy": body.strategy,
+            "strike": body.strike,
+            "expiry": body.expiry,
+            "dte_at_entry": 0,
+            "entry_price": body.entry_price,
+            "contracts": int(body.contracts),
+            "entry_delta": body.entry_delta,
+            "net_premium": round(float(body.entry_price) * 100 * int(body.contracts), 2),
+            "candidate_id": old_trade.get("candidate_id"),
+        }
+        insert_resp = supabase._client.table("trade_log").insert(new_row).execute()
+        inserted_rows = insert_resp.data or []
+        if inserted_rows:
+            inserted_trade_id = inserted_rows[0].get("id")
+
+        try:
+            supabase._client.table("trade_log").update({
+                "exit_date": datetime.now().strftime("%Y-%m-%d"),
+                "exit_price": body.buyback_price,
+                "pnl": pnl,
+            }).eq("id", trade_id).eq("user_id", user_id).is_("exit_date", "null").execute()
+        except Exception:
+            rollback = supabase._client.table("trade_log").delete().eq("user_id", user_id)
+            if inserted_trade_id:
+                rollback = rollback.eq("id", inserted_trade_id)
+            rollback.execute()
+            raise
+
+        return ActionResponse(success=True, message=f"Position rolled. Closed P&L: ${pnl:+.2f}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("roll_portfolio_position failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to roll position.")
 
 
 @router.post("/{trade_id}/close", response_model=ActionResponse)

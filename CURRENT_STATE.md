@@ -2,7 +2,7 @@
 
 Read `AGENTS.md` and `CURRENT_STATE.md` first; no code changes without my approval.
 
-Last updated: 2026-05-16 15:46 Europe/London
+Last updated: 2026-05-17 23:55 Europe/London
 
 ## AI Startup Note
 
@@ -120,10 +120,11 @@ database ownership rules are working together for this path.
 - Candidate confirmation now writes the portfolio row before marking the candidate as placed, with rollback cleanup if the final status update fails.
 - Frontend session handling now listens for Supabase auth state changes, and the account page reads tier info from `/me`.
 - Route/documentation drift cleanup is done locally:
-  - `backend/app.py` mounts `health`, `config`, `scan`, and `candidates`
+  - `backend/app.py` mounts `health`, `public`, `config`, `scan`,
+    `candidates`, and `billing`
   - current mounted endpoints are listed in `docs/API_ROUTES.md`
-  - older `/auth/*`, `/stripe/*`, and `/portfolio/*` backend paths are marked as
-    planned or legacy, not active mounted routes
+  - older `/auth/*`, `/stripe/*`, and legacy `/portfolio/*` backend paths are
+    marked as planned or legacy, not active mounted routes
 - Frontend shadow review flow is stable locally:
   - Google-hosted `next/font` dependency was removed from the root layout
   - `npm run build` uses `next build --webpack` for restricted local review
@@ -147,11 +148,30 @@ database ownership rules are working together for this path.
   - null/range validation counts were all zero
   - migration `006` should not be run as part of the next promotion unless a
     later schema check contradicts this
+- Full public-launch package was integrated locally on 2026-05-17 for production
+  promotion after user approval:
+  - landing-page conversion cleanup with AAPL/product preview, clearer CTAs,
+    three beginner strategy cards, visible pricing, testimonials, future-pacing,
+    and FAQ
+  - login/signup modal with Google OAuth entry and required Terms acceptance
+  - `/terms-of-service`
+  - newsletter subscription and floating Contact Us capture
+  - backend `/public/newsletter` and `/public/contact`
+  - migration `007_create_public_lead_tables.sql`
+  - Stripe Billing routes/UI/tests under `/billing/*`
+  - portfolio open/closed/detail/roll/chart upgrades
+- Verification on 2026-05-17:
+  - backend import passed
+  - `tools/test_greeks.py`, `tools/test_regressions.py`, and
+    `tools/test_billing.py` passed: `36 passed`
+  - frontend `npm run shadow:check` passed
 
 ## Known Issues From Latest Review
 
-1. Stripe/billing is still not implemented.
-   - Auth and onboarding now work much better, but billing and feature gating are still partial.
+1. Stripe/billing is implemented in code but still needs production operations.
+   - Live Stripe products/prices, Railway env vars, and the production webhook
+     must be configured and smoke-tested before turning beta access off.
+   - Keep `OPTIONBOT_BETA_ALL_MAX=true` for the first billing deploy.
 
 2. Historical documentation drift still exists.
    - `KEN_MASTER_HANDOFF.md` reflects an older single-user / Netlify-dashboard era.
@@ -161,7 +181,8 @@ database ownership rules are working together for this path.
 
 - That the SaaS layer is fully production-ready for broad public traffic
 - That every portfolio endpoint and portfolio math path is correct
-- That billing, plans, and Stripe gating are implemented
+- That billing enforcement is active; the code exists, but beta mode should
+  remain on until live Stripe is verified
 - That planned API surfaces beyond `docs/API_ROUTES.md` are mounted and complete
 - That older historical docs still describe the current deployed system accurately
 

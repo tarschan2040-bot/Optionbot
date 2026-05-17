@@ -51,6 +51,10 @@ Already configured. Ensure these tables exist (run migrations in order):
 - `migrations/004a_create_trade_workflow_tables.sql` only if
   `trade_candidates` or `trade_log` is missing in the target project
 - `migrations/005_harden_user_isolation.sql`
+- `migrations/006_add_mr_timing_confirmation.sql` only if the target project
+  does not already have the MR timing columns
+- `migrations/007_create_public_lead_tables.sql` for landing-page newsletter
+  signups and Contact Us messages
 
 Auth URL configuration also matters for email confirmation and password reset flows:
 
@@ -76,6 +80,26 @@ shadow Supabase project first. Do not apply it to production until:
 
 For the production promotion checklist and copy/paste precheck SQL, use
 `PRODUCTION_PROMOTION_CHECKLIST.md`.
+
+### Billing production variables
+
+Billing code is deployed separately from billing enforcement. Keep
+`OPTIONBOT_BETA_ALL_MAX=true` for the first production billing deploy so users
+retain Max access while Stripe is verified.
+
+Before turning on paid checkout, Railway must have:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_PRO_MONTHLY`
+- `STRIPE_PRICE_PRO_ANNUAL`
+- `STRIPE_PRICE_MAX_MONTHLY`
+- `STRIPE_PRICE_MAX_ANNUAL`
+- `FRONTEND_URL=https://app.optionbot.org`
+
+Stripe should send subscription events to:
+
+- `https://<railway-backend-domain>/billing/webhook`
 
 ## 4. Domain (optional)
 

@@ -121,7 +121,26 @@ async def get_current_user(
             detail="Auth not configured on server.",
         )
 
-    token = credentials.credentials
+    payload = _verify_token(credentials.credentials)
+    return payload["sub"]
+
+
+async def get_current_user_claims(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+) -> dict:
+    """Verify the Supabase JWT and return its claims for server-side integrations."""
+    return _verify_token(credentials.credentials)
+
+
+def _verify_token(token: str) -> dict:
+    """Verify a Supabase JWT and return the decoded claims."""
+    if not SUPABASE_URL:
+        log.error("SUPABASE_URL not set — cannot verify tokens.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth not configured on server.",
+        )
+
     try:
         # Get the signing key from JWKS
         key_data = _get_signing_key(token)
@@ -144,7 +163,7 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token missing user ID.",
             )
-        return user_id
+        return payload
 
     except JWTError as e:
         log.warning("JWT verification failed: %s", e)

@@ -433,9 +433,10 @@ def test_candidate_and_portfolio_reads_are_scoped_to_authenticated_user(monkeypa
     assert ("eq", "status", "starred") in candidate_query.filters
 
     trade_queries = _queries_for(fake_client, "trade_log", "select")
-    assert len(trade_queries) == 3
+    assert len(trade_queries) >= 3
     for query in trade_queries:
         _assert_user_filter(query, "user-b")
+    assert any(("is", "exit_date", "null") in query.is_filters for query in trade_queries)
 
 
 def test_portfolio_live_data_pnl_uses_active_candidate_route(monkeypatch):
@@ -567,6 +568,100 @@ def test_close_trade_rejects_negative_exit_price(monkeypatch):
 
     assert exc.value.status_code == 422
     assert _queries_for(fake_client, "trade_log", "update") == []
+
+
+def test_expired_position_stays_open_and_flags_review_needed(monkeypatch):
+    expiry = (date.today() - timedelta(days=1)).isoformat()
+    fake_client = RecordingClient({
+        ("trade_log", "select"): [{
+            "id": "trade-expired",
+            "user_id": "user-b",
+            "trade_date": "2026-05-01",
+            "ticker": "TEST",
+            "strategy": "COVERED_CALL",
+            "strike": 105.0,
+            "expiry": expiry,
+            "dte_at_entry": 30,
+            "entry_price": 2.10,
+            "contracts": 2,
+            "entry_delta": 0.30,
+            "exit_date": None,
+        }],
+    })
+    monkeypatch.setattr(candidates_router, "_get_supabase", lambda: _fake_supabase(fake_client))
+    monkeypatch.setattr(candidates_router, "_fetch_live_data", lambda positions: {})
+
+    positions = asyncio.run(candidates_router.get_portfolio(user_id="user-b"))
+
+    assert len(positions) == 1
+    assert positions[0].status == "open"
+    assert positions[0].dte_now == 0
+    assert positions[0].is_expired is True
+    assert _queries_for(fake_client, "trade_log", "update") == []
+
+
+def test_update_position_allows_entry_date(monkeypatch):
+    fake_client = RecordingClient({
+        ("trade_log", "select"): [{
+            "entry_price": 2.10,
+            "contracts": 1,
+        }],
+        ("trade_log", "update"): [],
+    })
+    monkeypatch.setattr(candidates_router, "_get_supabase", lambda: _fake_supabase(fake_client))
+
+    response = asyncio.run(candidates_router.update_portfolio_position(
+        "trade-1",
+        body=candidates_router.UpdateTradeRequest(
+            trade_date="2026-05-16",
+            entry_price=2.25,
+            contracts=2,
+        ),
+        user_id="user-b",
+    ))
+
+    assert response.success is True
+    update_query = _queries_for(fake_client, "trade_log", "update")[0]
+    assert update_query.payload == {
+        "trade_date": "2026-05-16",
+        "entry_price": 2.25,
+        "contracts": 2,
+        "net_premium": 450.0,
+    }
+    assert ("eq", "id", "trade-1") in update_query.filters
+    _assert_user_filter(update_query, "user-b")
+    assert ("is", "exit_date", "null") in update_query.is_filters
+
+
+def test_option_chart_uses_cached_points_when_yahoo_returns_empty(monkeypatch):
+    fake_client = RecordingClient({
+        ("trade_log", "select"): [{
+            "ticker": "TEST",
+            "strategy": "COVERED_CALL",
+            "strike": 105.0,
+            "expiry": "2026-06-19",
+        }],
+    })
+    symbol = candidates_router._yahoo_option_symbol("TEST", "2026-06-19", 105.0, "COVERED_CALL")
+    cache_key = (symbol, "15m", "5d")
+    cached_points = [
+        candidates_router.OptionChartPoint(timestamp="2026-05-16T14:30:00+00:00", close=1.25, volume=10)
+    ]
+    candidates_router._OPTION_CHART_CACHE[cache_key] = cached_points
+    monkeypatch.setattr(candidates_router, "_get_supabase", lambda: _fake_supabase(fake_client))
+    monkeypatch.setattr(candidates_router, "_fetch_option_chart", lambda *_args: [])
+
+    chart = asyncio.run(candidates_router.get_portfolio_option_chart(
+        "trade-1",
+        interval="15m",
+        range="5d",
+        user_id="user-b",
+    ))
+
+    assert chart.points == cached_points
+    assert chart.stale is True
+    assert "last available chart" in (chart.error or "")
+    candidates_router._OPTION_CHART_CACHE.pop(cache_key, None)
 
 
 def test_user_config_crud_is_scoped_to_authenticated_user():

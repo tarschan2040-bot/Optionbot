@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "@/hooks/useSession";
 import Nav from "@/components/Nav";
 import Link from "next/link";
+import { createCheckoutSession, createPortalSession, getMe } from "@/lib/api";
 
 function Check() { return <span className="text-emerald-400 mr-2">✓</span>; }
 function Cross() { return <span className="text-gray-600 mr-2">✗</span>; }
@@ -20,6 +21,7 @@ const PLANS = [
       { text: "Top 3 results visible", included: true },
       { text: "Default parameters (read-only)", included: true },
       { text: "Score, delta, premium data", included: true },
+      { text: "Free market updates and opportunity alerts", included: true },
       { text: "Full scan results", included: false },
       { text: "Custom parameters", included: false },
       { text: "Portfolio tracking", included: false },
@@ -75,6 +77,46 @@ const PLANS = [
 export default function PlansPage() {
   const { token } = useSession();
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
+  const [currentTier, setCurrentTier] = useState("free");
+  const [betaAllMax, setBetaAllMax] = useState(false);
+  const [busyPlan, setBusyPlan] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getMe(token)
+      .then((data) => {
+        if (cancelled) return;
+        setCurrentTier(data.tier || "free");
+        setBetaAllMax(Boolean(data.billing_beta_all_max));
+      })
+      .catch(() => {
+        if (!cancelled) setMessage("Could not load your current plan.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  async function handlePlanClick(planId: string) {
+    if (!token || planId === "free") return;
+    setBusyPlan(planId);
+    setMessage("");
+    try {
+      if (!betaAllMax && currentTier === planId) {
+        const portal = await createPortalSession(token);
+        window.location.assign(portal.url);
+        return;
+      }
+      const checkout = await createCheckoutSession(token, planId as "pro" | "max", billing);
+      window.location.assign(checkout.url);
+    } catch {
+      setMessage("Checkout is not available yet. Confirm Stripe environment variables are configured.");
+    } finally {
+      setBusyPlan(null);
+    }
+  }
 
   if (!token) return null;
 
@@ -106,6 +148,15 @@ export default function PlansPage() {
         <div className="grid md:grid-cols-3 gap-6">
           {PLANS.map((plan) => {
             const price = billing === "annual" ? plan.yearlyPrice : plan.monthlyPrice;
+            const isCurrent = !betaAllMax && currentTier === plan.id;
+            const buttonLabel =
+              plan.id === "free"
+                ? "Free Plan"
+                : busyPlan === plan.id
+                ? "Opening..."
+                : isCurrent
+                ? "Manage Billing"
+                : plan.cta;
             return (
               <div
                 key={plan.id}
@@ -138,6 +189,7 @@ export default function PlansPage() {
                 <p className="text-gray-400 text-sm mb-6">{plan.description}</p>
 
                 <button
+                  onClick={() => handlePlanClick(plan.id)}
                   className={`w-full py-3 rounded-lg font-semibold transition-colors mb-7 ${
                     plan.highlighted
                       ? "bg-emerald-600 hover:bg-emerald-500 text-white"
@@ -145,9 +197,9 @@ export default function PlansPage() {
                       ? "bg-gray-800 text-gray-400 cursor-default"
                       : "bg-gray-800 hover:bg-gray-700 text-white border border-gray-700"
                   }`}
-                  disabled={plan.id === "free"}
+                  disabled={plan.id === "free" || busyPlan !== null}
                 >
-                  {plan.cta}
+                  {buttonLabel}
                 </button>
 
                 <div className="space-y-3">
@@ -162,6 +214,13 @@ export default function PlansPage() {
             );
           })}
         </div>
+
+        {betaAllMax && (
+          <p className="mt-6 text-center text-sm text-amber-300">
+            Beta access is active, so paid tier enforcement is currently paused.
+          </p>
+        )}
+        {message && <p className="mt-4 text-center text-sm text-red-300">{message}</p>}
 
         {/* Comparison table */}
         <div className="mt-16">
@@ -179,6 +238,7 @@ export default function PlansPage() {
               <tbody className="text-gray-300">
                 <tr className="border-b border-gray-800/50"><td className="py-3">Daily scans</td><td className="py-3 text-center">3</td><td className="py-3 text-center">30</td><td className="py-3 text-center">Unlimited</td></tr>
                 <tr className="border-b border-gray-800/50"><td className="py-3">Visible results</td><td className="py-3 text-center">Top 3</td><td className="py-3 text-center">All</td><td className="py-3 text-center">All</td></tr>
+                <tr className="border-b border-gray-800/50"><td className="py-3">Market update emails</td><td className="py-3 text-center text-emerald-400">✓</td><td className="py-3 text-center text-emerald-400">✓</td><td className="py-3 text-center text-emerald-400">✓</td></tr>
                 <tr className="border-b border-gray-800/50"><td className="py-3">Custom parameters</td><td className="py-3 text-center text-gray-600">✗</td><td className="py-3 text-center text-emerald-400">✓</td><td className="py-3 text-center text-emerald-400">✓</td></tr>
                 <tr className="border-b border-gray-800/50"><td className="py-3">Portfolio tracking</td><td className="py-3 text-center text-gray-600">✗</td><td className="py-3 text-center">10 trades</td><td className="py-3 text-center">Unlimited</td></tr>
                 <tr className="border-b border-gray-800/50"><td className="py-3">Live P&L</td><td className="py-3 text-center text-gray-600">✗</td><td className="py-3 text-center text-emerald-400">✓</td><td className="py-3 text-center text-emerald-400">✓</td></tr>
@@ -192,8 +252,8 @@ export default function PlansPage() {
         </div>
 
         <div className="mt-12 text-center">
-          <p className="text-gray-500 text-sm">7-day free trial on all paid plans. Cancel anytime.</p>
-          <p className="text-gray-600 text-xs mt-2">Stripe payments coming soon.</p>
+          <p className="text-gray-500 text-sm">Cancel anytime from the billing portal.</p>
+          <p className="text-gray-600 text-xs mt-2">Payments are processed securely by Stripe.</p>
         </div>
       </main>
     </div>

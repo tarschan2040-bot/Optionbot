@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "@/hooks/useSession";
 import Nav from "@/components/Nav";
 import Link from "next/link";
@@ -9,8 +9,8 @@ import {
   confirmCandidate,
   removeCandidate,
   getPortfolio,
+  getClosedPortfolio,
   getPortfolioSummary,
-  closeTrade,
 } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -29,7 +29,12 @@ interface Position {
   current_delta: number | null; current_iv: number | null;
   current_theta: number | null; stock_day_change_pct: number | null;
   pnl_dollars: number | null; pnl_percent: number | null;
-  opened_at: string | null; contracts: number;
+  cost_basis: number; average_price: number; market_value: number | null;
+  portfolio_percent: number | null; today_change_pct: number | null;
+  opened_at: string | null; contracts: number; same_contracts: number;
+  option_type: string; option_label: string; exit_date: string | null;
+  exit_price: number | null; realized_pnl: number | null; status: string;
+  is_expired: boolean;
 }
 
 interface Summary {
@@ -41,6 +46,8 @@ interface Summary {
 }
 
 type Tab = "portfolio" | "candidates";
+type SortKey = "strategy" | "contract" | "same_contracts" | "dte_now" | "delta" | "stock" | "day" | "entry" | "current" | "pnl" | "exit_date";
+type SortDirection = "asc" | "desc";
 
 // ── Components ───────────────────────────────────────────────────────────
 
@@ -59,6 +66,115 @@ function PnlText({ value, suffix }: { value: number | null; suffix?: string }) {
   const color = value >= 0 ? "text-emerald-400" : "text-red-400";
   const sign = value >= 0 ? "+" : "";
   return <span className={`font-bold ${color}`}>{sign}{value.toFixed(2)}{suffix || ""}</span>;
+}
+
+function strategyLabel(strategy: string) {
+  return strategy === "COVERED_CALL" ? "Covered Call" : "Cash-Secured Put";
+}
+
+function strategyChip(strategy: string) {
+  return strategy === "COVERED_CALL" ? "CC" : "CSP";
+}
+
+function sortValue(position: Position, key: SortKey) {
+  switch (key) {
+    case "strategy": return strategyLabel(position.strategy);
+    case "contract": return position.option_label || position.ticker;
+    case "same_contracts": return position.same_contracts;
+    case "dte_now": return position.is_expired ? -1 : position.dte_now;
+    case "delta": return position.current_delta ?? position.entry_delta ?? 0;
+    case "stock": return position.current_stock_price ?? -1;
+    case "day": return position.stock_day_change_pct ?? 0;
+    case "entry": return position.entry_premium;
+    case "current": return position.current_option_price ?? -1;
+    case "pnl": return position.pnl_dollars ?? position.realized_pnl ?? 0;
+    case "exit_date": return position.exit_date || "";
+    default: return 0;
+  }
+}
+
+function PositionTable({
+  title,
+  positions,
+  emptyText,
+  sortKey,
+  sortDirection,
+  onSort,
+}: {
+  title: string;
+  positions: Position[];
+  emptyText: string;
+  sortKey: SortKey;
+  sortDirection: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  function sortIndicator(key: SortKey) {
+    if (sortKey !== key) return "";
+    return sortDirection === "asc" ? " ↑" : " ↓";
+  }
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-xl font-bold mb-4">{title}</h2>
+      {positions.length === 0 ? (
+        <div className="rounded-lg border border-gray-800 py-10 text-center text-gray-500">{emptyText}</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 text-gray-400 text-left">
+                <th className="pb-3 pr-3 cursor-pointer hover:text-white" onClick={() => onSort("strategy")}>Strategy{sortIndicator("strategy")}</th>
+                <th className="pb-3 pr-3 cursor-pointer hover:text-white" onClick={() => onSort("contract")}>Contract{sortIndicator("contract")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("same_contracts")}>Qty{sortIndicator("same_contracts")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("dte_now")}>DTE{sortIndicator("dte_now")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("delta")}>Delta{sortIndicator("delta")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("stock")}>Stock{sortIndicator("stock")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("day")}>Day%{sortIndicator("day")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("entry")}>Entry{sortIndicator("entry")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("current")}>Current{sortIndicator("current")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("pnl")}>P&L ${sortIndicator("pnl")}</th>
+                <th className="pb-3 pr-3 text-right cursor-pointer hover:text-white" onClick={() => onSort("exit_date")}>Closed{sortIndicator("exit_date")}</th>
+                <th className="pb-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((p) => (
+                <tr key={p.id} className="border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors">
+                  <td className="py-3 pr-3"><span className={`px-2 py-0.5 rounded text-xs font-medium ${p.strategy === "COVERED_CALL" ? "bg-blue-900/50 text-blue-300" : "bg-purple-900/50 text-purple-300"}`}>{strategyChip(p.strategy)}</span></td>
+                  <td className="py-3 pr-3 min-w-52">
+                    <div className="font-semibold">{p.option_label || `${p.ticker} ${p.expiry}`}</div>
+                    <div className="text-xs text-gray-500">{strategyLabel(p.strategy)}</div>
+                  </td>
+                  <td className="py-3 pr-3 text-right font-mono">{p.same_contracts}</td>
+                  <td className="py-3 pr-3 text-right">
+                    {p.status !== "open" ? (
+                      <span className="text-gray-500">—</span>
+                    ) : p.is_expired ? (
+                      <span className="rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white">Expired</span>
+                    ) : (
+                      <span className={p.dte_now <= 7 ? "text-red-400 font-bold" : ""}>{p.dte_now}</span>
+                    )}
+                  </td>
+                  <td className="py-3 pr-3 text-right font-mono">{(p.current_delta ?? p.entry_delta) != null ? (p.current_delta ?? p.entry_delta).toFixed(3) : "—"}</td>
+                  <td className="py-3 pr-3 text-right">{p.current_stock_price != null ? `$${p.current_stock_price.toFixed(2)}` : "—"}</td>
+                  <td className="py-3 pr-3 text-right">{p.stock_day_change_pct != null ? <span className={p.stock_day_change_pct >= 0 ? "text-emerald-400" : "text-red-400"}>{p.stock_day_change_pct >= 0 ? "+" : ""}{p.stock_day_change_pct.toFixed(2)}%</span> : "—"}</td>
+                  <td className="py-3 pr-3 text-right font-mono">${p.entry_premium.toFixed(2)}</td>
+                  <td className="py-3 pr-3 text-right font-mono">{p.status === "closed" ? (p.exit_price != null ? `$${p.exit_price.toFixed(2)}` : "—") : (p.current_option_price != null ? `$${p.current_option_price.toFixed(2)}` : "—")}</td>
+                  <td className="py-3 pr-3 text-right"><PnlText value={p.pnl_dollars ?? p.realized_pnl} /></td>
+                  <td className="py-3 pr-3 text-right text-gray-400">{p.exit_date || "—"}</td>
+                  <td className="py-3 text-right">
+                    <Link href={`/portfolio/${p.id}`} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg border border-gray-700 transition-colors">
+                      {p.status === "closed" ? "View" : "Edit"}
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 // Simple P&L chart using SVG
@@ -166,10 +282,15 @@ export default function PortfolioPage() {
   const [activeTab, setActiveTab] = useState<Tab>("portfolio");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [closedPositions, setClosedPositions] = useState<Position[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loadingC, setLoadingC] = useState(false);
   const [loadingP, setLoadingP] = useState(false);
   const [msg, setMsg] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("dte_now");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [closedSortKey, setClosedSortKey] = useState<SortKey>("exit_date");
+  const [closedSortDirection, setClosedSortDirection] = useState<SortDirection>("desc");
 
   const loadCandidates = useCallback(async () => {
     if (!token) return;
@@ -182,8 +303,9 @@ export default function PortfolioPage() {
     if (!token) return;
     setLoadingP(true);
     try {
-      const [pos, sum] = await Promise.all([getPortfolio(token), getPortfolioSummary(token)]);
+      const [pos, closed, sum] = await Promise.all([getPortfolio(token), getClosedPortfolio(token), getPortfolioSummary(token)]);
       setPositions(pos);
+      setClosedPositions(closed);
       setSummary(sum);
     } catch (e) { console.error(e); }
     finally { setLoadingP(false); }
@@ -201,6 +323,50 @@ export default function PortfolioPage() {
 
   function flash(m: string) { setMsg(m); setTimeout(() => setMsg(""), 3000); }
 
+  const sortedPositions = useMemo(() => {
+    return [...positions].sort((a, b) => {
+      const aValue = sortValue(a, sortKey);
+      const bValue = sortValue(b, sortKey);
+      if (typeof aValue === "string" || typeof bValue === "string") {
+        const compared = String(aValue).localeCompare(String(bValue));
+        return sortDirection === "asc" ? compared : -compared;
+      }
+      const compared = Number(aValue) - Number(bValue);
+      return sortDirection === "asc" ? compared : -compared;
+    });
+  }, [positions, sortKey, sortDirection]);
+
+  const sortedClosedPositions = useMemo(() => {
+    return [...closedPositions].sort((a, b) => {
+      const aValue = sortValue(a, closedSortKey);
+      const bValue = sortValue(b, closedSortKey);
+      if (typeof aValue === "string" || typeof bValue === "string") {
+        const compared = String(aValue).localeCompare(String(bValue));
+        return closedSortDirection === "asc" ? compared : -compared;
+      }
+      const compared = Number(aValue) - Number(bValue);
+      return closedSortDirection === "asc" ? compared : -compared;
+    });
+  }, [closedPositions, closedSortKey, closedSortDirection]);
+
+  function handleSort(nextKey: SortKey) {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(nextKey);
+      setSortDirection(nextKey === "dte_now" ? "asc" : "desc");
+    }
+  }
+
+  function handleClosedSort(nextKey: SortKey) {
+    if (closedSortKey === nextKey) {
+      setClosedSortDirection((current) => current === "asc" ? "desc" : "asc");
+    } else {
+      setClosedSortKey(nextKey);
+      setClosedSortDirection(nextKey === "exit_date" ? "desc" : "asc");
+    }
+  }
+
   async function handleConfirm(id: string) {
     if (!token) return;
     try { await confirmCandidate(token, id); flash("Trade confirmed!"); loadCandidates(); loadPortfolio(); }
@@ -211,19 +377,6 @@ export default function PortfolioPage() {
     try { await removeCandidate(token, id); flash("Removed."); loadCandidates(); }
     catch { flash("Failed."); }
   }
-  async function handleClose(id: string) {
-    if (!token) return;
-    const exitPrice = prompt("Exit price (option premium at close, 0 if expired worthless):");
-    if (exitPrice === null) return;
-    const parsedExitPrice = Number(exitPrice.trim());
-    if (!Number.isFinite(parsedExitPrice) || parsedExitPrice < 0) {
-      flash("Enter a valid exit price.");
-      return;
-    }
-    try { const r = await closeTrade(token, id, parsedExitPrice); flash(r.message); loadPortfolio(); }
-    catch { flash("Failed."); }
-  }
-
   if (!token) return null;
 
   return (
@@ -260,62 +413,33 @@ export default function PortfolioPage() {
             {/* P&L Chart */}
             {positions.length > 0 && <PnlChart positions={positions} />}
 
-            <h2 className="text-xl font-bold mb-4">Open Positions</h2>
-
             {loadingP ? (
               <div className="text-center py-16 text-gray-500">Loading portfolio and live prices...</div>
-            ) : positions.length === 0 ? (
-              <div className="text-center py-16">
-                <p className="text-gray-500">No open positions.</p>
-                <p className="text-gray-600 text-sm mt-2">Star candidates from <Link href="/scan" className="text-emerald-400 hover:underline">Scan</Link> and confirm them.</p>
-              </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-800 text-gray-400 text-left">
-                      <th className="pb-3 pr-3">Ticker</th>
-                      <th className="pb-3 pr-3">Type</th>
-                      <th className="pb-3 pr-3 text-right">Strike</th>
-                      <th className="pb-3 pr-3 text-right">Expiry</th>
-                      <th className="pb-3 pr-3 text-right">DTE</th>
-                      <th className="pb-3 pr-3 text-right">Stock</th>
-                      <th className="pb-3 pr-3 text-right">Day%</th>
-                      <th className="pb-3 pr-3 text-right">Entry</th>
-                      <th className="pb-3 pr-3 text-right">Current</th>
-                      <th className="pb-3 pr-3 text-right">IV</th>
-                      <th className="pb-3 pr-3 text-right">P&L $</th>
-                      <th className="pb-3 pr-3 text-right">P&L %</th>
-                      <th className="pb-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {positions.map((p) => (
-                      <tr key={p.id} className="border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors">
-                        <td className="py-3 pr-3 font-semibold">{p.ticker}</td>
-                        <td className="py-3 pr-3"><span className={`px-2 py-0.5 rounded text-xs font-medium ${p.strategy === "COVERED_CALL" ? "bg-blue-900/50 text-blue-300" : "bg-purple-900/50 text-purple-300"}`}>{p.strategy === "COVERED_CALL" ? "CC" : "CSP"}</span></td>
-                        <td className="py-3 pr-3 text-right">${p.strike.toFixed(2)}</td>
-                        <td className="py-3 pr-3 text-right text-gray-400">{p.expiry}</td>
-                        <td className="py-3 pr-3 text-right"><span className={p.dte_now <= 7 ? "text-red-400 font-bold" : ""}>{p.dte_now}</span></td>
-                        <td className="py-3 pr-3 text-right">{p.current_stock_price != null ? `$${p.current_stock_price.toFixed(2)}` : "—"}</td>
-                        <td className="py-3 pr-3 text-right">{p.stock_day_change_pct != null ? <span className={p.stock_day_change_pct >= 0 ? "text-emerald-400" : "text-red-400"}>{p.stock_day_change_pct >= 0 ? "+" : ""}{p.stock_day_change_pct.toFixed(2)}%</span> : "—"}</td>
-                        <td className="py-3 pr-3 text-right font-mono">${p.entry_premium.toFixed(2)}</td>
-                        <td className="py-3 pr-3 text-right font-mono">{p.current_option_price != null ? `$${p.current_option_price.toFixed(2)}` : "—"}</td>
-                        <td className="py-3 pr-3 text-right">{p.current_iv != null ? `${(p.current_iv * 100).toFixed(1)}%` : "—"}</td>
-                        <td className="py-3 pr-3 text-right"><PnlText value={p.pnl_dollars} /></td>
-                        <td className="py-3 pr-3 text-right"><PnlText value={p.pnl_percent} suffix="%" /></td>
-                        <td className="py-3"><button onClick={() => handleClose(p.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg border border-gray-700 transition-colors">Close</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <>
+                <PositionTable
+                  title="Open Positions"
+                  positions={sortedPositions}
+                  emptyText="No open positions. Star candidates from Scan and confirm them."
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onSort={handleSort}
+                />
                 {positions.some((p) => p.pnl_dollars != null) && (
                   <div className="mt-4 pt-4 border-t border-gray-800 flex justify-end gap-8 text-sm">
                     <span className="text-gray-400">Unrealised Total:</span>
                     <PnlText value={positions.reduce((s, p) => s + (p.pnl_dollars || 0), 0)} />
                   </div>
                 )}
-              </div>
+                <PositionTable
+                  title="Closed Positions"
+                  positions={sortedClosedPositions}
+                  emptyText="No closed positions yet. Expired positions stay open until you review and close them."
+                  sortKey={closedSortKey}
+                  sortDirection={closedSortDirection}
+                  onSort={handleClosedSort}
+                />
+              </>
             )}
           </>
         )}

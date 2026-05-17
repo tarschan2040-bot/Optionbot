@@ -4,13 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useSession } from "@/hooks/useSession";
 import Nav from "@/components/Nav";
 import { createClient } from "@/lib/supabase";
-import { getMe } from "@/lib/api";
+import { createPortalSession, getMe } from "@/lib/api";
 import Link from "next/link";
 
 export default function AccountPage() {
   const { token } = useSession();
   const [email, setEmail] = useState("");
   const [currentTier, setCurrentTier] = useState("free");
+  const [betaAllMax, setBetaAllMax] = useState(false);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingMsg, setBillingMsg] = useState("");
   const [changingPw, setChangingPw] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [pwMsg, setPwMsg] = useState("");
@@ -27,7 +30,10 @@ export default function AccountPage() {
     let cancelled = false;
     getMe(token)
       .then((data) => {
-        if (!cancelled) setCurrentTier(data.tier || "free");
+        if (!cancelled) {
+          setCurrentTier(data.tier || "free");
+          setBetaAllMax(Boolean(data.billing_beta_all_max));
+        }
       })
       .catch((err) => {
         console.error("Failed to load account tier", err);
@@ -53,6 +59,20 @@ export default function AccountPage() {
       setPwMsg(err instanceof Error ? err.message : "Failed to update password.");
     } finally {
       setChangingPw(false);
+    }
+  }
+
+  async function handleManageBilling() {
+    if (!token) return;
+    setBillingBusy(true);
+    setBillingMsg("");
+    try {
+      const data = await createPortalSession(token);
+      window.location.assign(data.url);
+    } catch {
+      setBillingMsg("Billing portal is not available for this account yet.");
+    } finally {
+      setBillingBusy(false);
     }
   }
 
@@ -119,15 +139,29 @@ export default function AccountPage() {
           </div>
           <p className="text-gray-400 text-sm mb-4">
             {isPaidTier
-              ? `You're on the ${tierLabel} plan. Full access is enabled for your current tier.`
+              ? betaAllMax
+                ? `You're on ${tierLabel} beta access while billing is being prepared.`
+                : `You're on the ${tierLabel} plan. Full access is enabled for your current tier.`
               : "You're on the Free plan. Upgrade to Pro for real-time scans, unlimited tickers, and full customisation."}
           </p>
-          <Link
-            href="/account/plans"
-            className="inline-block px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors"
-          >
-            {isPaidTier ? "Manage Plan" : "Upgrade to Pro"}
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/account/plans"
+              className="inline-block px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors"
+            >
+              {isPaidTier && !betaAllMax ? "Change Plan" : "View Plans"}
+            </Link>
+            {isPaidTier && !betaAllMax && (
+              <button
+                onClick={handleManageBilling}
+                disabled={billingBusy}
+                className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white font-medium rounded-lg border border-gray-700 transition-colors disabled:opacity-60"
+              >
+                {billingBusy ? "Opening..." : "Manage Billing"}
+              </button>
+            )}
+          </div>
+          {billingMsg && <p className="mt-3 text-sm text-amber-300">{billingMsg}</p>}
         </section>
       </main>
     </div>

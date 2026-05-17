@@ -1,6 +1,6 @@
 # AI Context
 
-Last updated: 2026-05-16 15:46 Europe/London
+Last updated: 2026-05-17 23:55 Europe/London
 
 This is the compact startup context for future AI sessions. Read this after
 `AGENTS.md`; open deeper docs only when the task needs them.
@@ -108,6 +108,26 @@ This is the compact startup context for future AI sessions. Read this after
   - do not run migration `006` for this promotion unless a later check disagrees
 - `tools/test_regressions.py` exists for recent isolation/MR/workflow coverage,
   including the manual web Scan write path.
+- Local public-launch UX batch was built on 2026-05-17 but is not deployed:
+  - login/signup modal, Google OAuth entry, expanded signup fields, required
+    Terms of Service acceptance, `/terms-of-service`
+  - landing-page market update signup and floating Contact Us modal
+  - backend `/public/newsletter` and `/public/contact` routes
+  - migration `007_create_public_lead_tables.sql` for
+    `newsletter_subscribers` and `contact_messages`
+  - frontend `npm run shadow:check` and backend import passed
+  - production remains untouched; apply migration `007` only after shadow review
+    and separate production approval
+- Local landing-page conversion cleanup was built on 2026-05-17 but is not
+  deployed:
+  - AAPL/product preview moved directly after the hero
+  - visible strategy cards reduced to three beginner-relevant examples
+  - strategy headings are plain-English first, technical names second
+  - visible landing wording avoids bullish/bearish/neutral jargon
+  - visible pricing, testimonials/social proof, future-pacing, and FAQ sections
+    added
+  - frontend `npm run shadow:check` and backend import passed
+  - production remains untouched
 
 ## Known Issues
 
@@ -116,10 +136,30 @@ This is the compact startup context for future AI sessions. Read this after
   `trade_candidates`.
 - `backend/routers/portfolio.py` is retired and not mounted. Current mounted
   routes are listed in `docs/API_ROUTES.md`.
-- Billing/Stripe is still not implemented; beta mode currently grants Max tier.
+- Billing/Stripe is implemented in code but not yet fully activated in
+  production operations; beta mode currently grants Max tier.
+- Stripe Billing code now exists locally for production promotion:
+  `/billing/plans`, `/billing/checkout`, `/billing/portal`, and
+  `/billing/webhook`. Keep `OPTIONBOT_BETA_ALL_MAX=true` for the first live
+  billing deploy until live Stripe products/prices, webhook signing, and
+  subscription sync are verified.
 - `SAAS_MASTER_PLAN.md` and `KEN_MASTER_HANDOFF.md` are useful history but are
   not fully up to date with live auth/domain/SMTP milestones. The master plan's
   API section now distinguishes current mounted routes from planned routes.
+- Full public-launch package was integrated locally on 2026-05-17:
+  landing-page conversion rewrite, login/signup modal, Terms page, newsletter
+  and Contact Us capture, public lead endpoints, Stripe billing routes/UI, and
+  portfolio open/closed/detail/roll/chart upgrades.
+- Verification on 2026-05-17:
+  - backend import passed
+  - `tools/test_greeks.py`, `tools/test_regressions.py`, and
+    `tools/test_billing.py` passed: `36 passed`
+  - frontend `npm run shadow:check` passed
+- Production still needs operational follow-through after code deploy:
+  - apply `migrations/007_create_public_lead_tables.sql` before relying on live
+    newsletter/contact persistence
+  - configure live Stripe env vars and `/billing/webhook`
+  - leave `OPTIONBOT_BETA_ALL_MAX=true` until billing is confirmed end to end
 
 ## Recommended Next Step
 

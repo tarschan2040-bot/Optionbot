@@ -23,7 +23,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import health, config, scan, candidates
+from backend.routers import health, config, scan, candidates, billing, public
 
 # ── App setup ─────────────────────────────────────────────────────────────
 
@@ -37,7 +37,13 @@ app = FastAPI(
 
 _origins = [
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "https://optionbot-theta.vercel.app",
     "https://app.optionbot.org",
     "https://optionbot.org",
@@ -60,6 +66,8 @@ app.add_middleware(
 # ── Register routers ──────────────────────────────────────────────────────
 
 app.include_router(health.router, tags=["Health"])
+app.include_router(public.router, prefix="/public", tags=["Public"])
 app.include_router(config.router, prefix="/config", tags=["Config"])
 app.include_router(scan.router, prefix="/scan", tags=["Scan"])
 app.include_router(candidates.router, prefix="/candidates", tags=["Candidates"])
+app.include_router(billing.router, prefix="/billing", tags=["Billing"])

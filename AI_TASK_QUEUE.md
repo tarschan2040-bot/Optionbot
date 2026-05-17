@@ -64,6 +64,28 @@ task. Do not start change-making work without approval.
   user-run SQL. Production already has the three MR timing columns, and all
   null/range validation counts were zero. Do not run migration `006` for this
   promotion unless later checks disagree.
+- 2026-05-17: Built the first public-launch UX batch locally, excluding the
+  broader landing-page layout/conversion rewrite. Added login/signup modal with
+  Google OAuth entry, expanded email signup fields, required Terms of Service
+  acceptance, `/terms-of-service`, landing-page market update signup, floating
+  Contact Us modal, public lead-capture backend routes, and migration `007` for
+  `newsletter_subscribers` and `contact_messages`. Frontend `npm run
+  shadow:check` and backend import passed. Production remains untouched.
+- 2026-05-17: Built the landing-page conversion cleanup locally in shadow mode.
+  Kept the hero concept and guided input, moved the AAPL/product example
+  directly after the hero, reduced visible strategy cards to three
+  beginner-relevant examples, changed strategy headings to plain-English titles
+  with technical names as subtitles, replaced bullish/bearish/neutral wording in
+  the visible landing flow, added product preview, visible pricing, testimonials,
+  future-pacing, and FAQ sections, and rewrote visible CTAs to clearer outcomes.
+  Frontend `npm run shadow:check` and backend import passed. Production remains
+  untouched.
+- 2026-05-17: Integrated the full public-launch production package after user
+  approval to deploy: landing-page conversion cleanup, public login/signup modal
+  work, Terms page, newsletter/contact capture, Stripe billing routes/UI/tests,
+  and portfolio open/closed/detail/roll/chart upgrades. Verification passed:
+  backend import, Python greeks/regression/billing tests (`36 passed`), and
+  frontend `npm run shadow:check`.
 
 ## Ready For Approval
 
@@ -76,6 +98,80 @@ task. Do not start change-making work without approval.
    - Scope: verify live pages and read paths after deployment. Any write test
      needs separate explicit approval.
    - Production impact: depends on approved smoke-test scope.
+
+## Pending Production Operations
+
+These items may be outside the Git code push and should be checked after the
+live deployment:
+
+- Apply `migrations/007_create_public_lead_tables.sql` to production Supabase
+  before relying on live newsletter/contact persistence.
+- Configure live Stripe env vars in Railway:
+  `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+  `STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_ANNUAL`,
+  `STRIPE_PRICE_MAX_MONTHLY`, and `STRIPE_PRICE_MAX_ANNUAL`.
+- Configure the live Stripe webhook to call the production backend
+  `/billing/webhook`.
+- Keep `OPTIONBOT_BETA_ALL_MAX=true` for the first production billing deploy.
+- Run live smoke checks for homepage, login/signup modal, authenticated
+  portfolio, scan page, public lead forms, and billing plan display.
+
+## Public Launch Package In Current Deployment
+
+### Included In The Production Push
+
+- Stripe billing package:
+  - backend `/billing/plans`, `/billing/checkout`, `/billing/portal`, and
+    `/billing/webhook` routes
+  - Stripe Checkout, Customer Portal, and webhook subscription sync
+  - account billing UI for plan selection, monthly/annual billing, and manage
+    billing
+  - billing docs, Stripe shadow notes, production promotion notes, and billing
+    tests
+  - keep `OPTIONBOT_BETA_ALL_MAX=true` for the first production billing deploy
+- Portfolio upgrades:
+  - Open Positions and Closed Positions tables
+  - DTE sorting with closest expiry first
+  - `Strategy` as the left-most table column
+  - contract label format such as `TSLA JUN 18 '26 470 Call`
+  - Delta column instead of IV
+  - same-contract position count
+  - expired positions remain in Open Positions and show `Expired` until user
+    reviews them
+  - position detail page with top summary box, position detail section, edit
+    section, delete, close, expired-worthless, and roll actions
+  - roll position page
+  - option contract price chart using Yahoo when available, with previous chart
+    fallback when Yahoo has no new data
+  - Greeks/payoff chart with Greek selector
+- Public-launch UX batch:
+  - login/signup modal instead of sending landing-page visitors to a separate
+    login page
+  - Google OAuth entry point
+  - signup fields for email, first name, last name, optional mobile number,
+    password, and confirm password
+  - required `I agree to the Terms of Service` checkbox for signup
+  - `/terms-of-service` page with OptionBot-specific launch draft language
+  - landing-page subscription capture for free market updates and opportunity
+    alerts
+  - Free plan benefit copy for market updates and opportunity alerts
+  - floating bottom-right `Contact Us` button and contact form modal
+  - backend `/public/newsletter` and `/public/contact` endpoints
+  - migration `007_create_public_lead_tables.sql` for the new public lead
+    tables
+- Landing-page conversion cleanup:
+  - AAPL/product example moved directly after the hero
+  - visible landing-page strategy cards reduced to the three most practical
+    beginner starts
+  - plain-English strategy titles are primary, with technical names as smaller
+    subtitles
+  - visible landing flow uses beginner wording like `Stock going up`,
+    `Stock going down`, and `Stock going sideways`
+  - product preview table added for AAPL setups
+  - pricing now shows `Free`, `Pro`, and `Max` with visible monthly numbers
+  - testimonials/social proof, future-pacing, and FAQ sections added
+  - visible CTAs now use clearer outcomes such as `Try free with AAPL`,
+    `See free AAPL setups`, and `Start free - no card needed`
 
 ## Needs Product Decision
 

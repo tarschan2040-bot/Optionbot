@@ -6,6 +6,7 @@ Pro:   30 scans/day, all results, 10 portfolio trades, config edit  ($19.99/mo)
 Max:   Unlimited scans, all results, unlimited portfolio, all features ($49.99/mo)
 """
 import logging
+import os
 from datetime import datetime, date
 
 from fastapi import Depends, HTTPException, status
@@ -47,9 +48,15 @@ TIERS = {
 }
 
 
-## BETA MODE: All users get Max tier until payment system launches.
-## When ready to enforce tiers, set this to False.
-BETA_ALL_MAX = True
+## BETA MODE: All users get Max tier until payment enforcement launches.
+## Set OPTIONBOT_BETA_ALL_MAX=false after Stripe webhooks and subscriptions are
+## verified in production.
+BETA_ALL_MAX = os.getenv("OPTIONBOT_BETA_ALL_MAX", "true").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 
 
 def get_user_tier(user_id: str) -> str:
@@ -157,6 +164,7 @@ async def get_tier_info(user_id: str = Depends(get_current_user)) -> dict:
         # Portfolio
         "can_use_portfolio": tier["can_use_portfolio"],
         "portfolio_limit": tier["portfolio_limit"],
+        "billing_beta_all_max": BETA_ALL_MAX,
     }
 
 

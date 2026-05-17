@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import AuthModal from "@/components/AuthModal";
+import { sendContactMessage, subscribeMarketUpdates } from "@/lib/api";
 import { createClient } from "@/lib/supabase";
 
 type CategoryId =
@@ -19,6 +21,7 @@ type LanguageId = "zh-CN" | "zh-TW" | "en" | "es" | "fr";
 type Strategy = {
   id: string;
   name: string;
+  plainTitle: string;
   categories: CategoryId[];
   purpose: string;
   bestWhen: string;
@@ -142,8 +145,7 @@ const LANDING_NAV_COPY: Record<
 };
 
 const LEGAL_LINKS = [
-  { href: "/terms-and-conditions", label: "Terms and Conditions" },
-  { href: "/terms-of-use", label: "Terms of Use" },
+  { href: "/terms-of-service", label: "Terms of Service" },
   { href: "/privacy-notice", label: "Privacy Notice" },
   { href: "/cookie-policy", label: "Cookie Policy" },
   { href: "/modern-slavery", label: "Modern Slavery" },
@@ -155,23 +157,23 @@ function isLanguageId(value: string | null): value is LanguageId {
 
 const CATEGORY_META: Record<CategoryId, { label: string; blurb: string }> = {
   "own-stock": {
-    label: "Own Stock",
+    label: "Own shares",
     blurb: "You already have shares and want income or protection around that position.",
   },
   income: {
-    label: "Income",
+    label: "Earn income",
     blurb: "You want premium income without starting from an overwhelming option chain.",
   },
   bullish: {
-    label: "Bullish",
+    label: "Stock going up",
     blurb: "You think the stock can move higher and want a strategy to match that view.",
   },
   bearish: {
-    label: "Bearish",
+    label: "Stock going down",
     blurb: "You expect weakness or want to fade a rally with defined trade-offs.",
   },
   neutral: {
-    label: "Neutral",
+    label: "Stock going sideways",
     blurb: "You expect a stock to stay in a range and want strategies that fit calmer price action.",
   },
   protection: {
@@ -202,21 +204,21 @@ const HERO_GOALS: Array<{
   },
   {
     id: "bullish",
-    label: "Bullish",
+    label: "Stock going up",
     summary: "Express an upside view with strategies that match how aggressive or cautious you want to be.",
     coaching:
       "We can show stock-linked income ideas, defined-risk spreads, or lower-capital stock replacements.",
   },
   {
     id: "bearish",
-    label: "Bearish",
+    label: "Stock going down",
     summary: "Position for weakness with defined trade-offs instead of guessing from a raw options chain.",
     coaching:
       "Bearish strategies can be income-oriented, directional, or built to fade a rally from resistance.",
   },
   {
     id: "neutral",
-    label: "Neutral",
+    label: "Stock going sideways",
     summary: "Use range-bound strategies when you expect a stock to stay relatively calm.",
     coaching:
       "Neutral setups can be powerful once the market view is clear and the trade structure is understood.",
@@ -258,6 +260,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "covered-call",
     name: "Covered Call",
+    plainTitle: "Earn income from shares you already own",
     categories: ["own-stock", "income", "neutral"],
     purpose: "Generate income from shares you already own.",
     bestWhen:
@@ -275,6 +278,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "cash-secured-put",
     name: "Cash-Secured Put",
+    plainTitle: "Get paid while waiting to buy a stock lower",
     categories: ["income", "bullish"],
     purpose: "Get paid while waiting to buy a stock at a lower price.",
     bestWhen:
@@ -292,6 +296,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "protective-put",
     name: "Protective Put",
+    plainTitle: "Buy insurance for shares you want to keep",
     categories: ["own-stock", "protection"],
     purpose: "Put a downside floor under shares you already own.",
     bestWhen:
@@ -309,6 +314,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "collar",
     name: "Collar",
+    plainTitle: "Protect shares while giving up some upside",
     categories: ["own-stock", "protection", "neutral", "income"],
     purpose: "Protect owned shares while helping offset hedge cost with call income.",
     bestWhen:
@@ -326,6 +332,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "bull-put-spread",
     name: "Bull Put Spread",
+    plainTitle: "Earn income on a stock you think will hold up",
     categories: ["bullish", "income"],
     purpose: "Collect premium with defined risk when you are moderately bullish.",
     bestWhen:
@@ -343,6 +350,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "bear-call-spread",
     name: "Bear Call Spread",
+    plainTitle: "Earn income when you think a stock will not break higher",
     categories: ["bearish", "income"],
     purpose: "Collect premium with defined risk when you are bearish or expect the stock to stall.",
     bestWhen:
@@ -360,6 +368,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "bull-call-spread",
     name: "Bull Call Spread",
+    plainTitle: "Target upside with a fixed maximum loss",
     categories: ["bullish"],
     purpose: "Target upside with defined risk and lower cost than a plain long call.",
     bestWhen:
@@ -377,6 +386,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "bear-put-spread",
     name: "Bear Put Spread",
+    plainTitle: "Target downside with a fixed maximum loss",
     categories: ["bearish"],
     purpose: "Target downside with defined risk and lower cost than a plain long put.",
     bestWhen:
@@ -394,6 +404,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "iron-condor",
     name: "Iron Condor",
+    plainTitle: "Get paid if a stock stays inside a range",
     categories: ["neutral", "income"],
     purpose: "Collect premium when you expect the stock to stay inside a range.",
     bestWhen:
@@ -411,6 +422,7 @@ const STRATEGIES: Strategy[] = [
   {
     id: "poor-mans-covered-call",
     name: "Poor Man's Covered Call / Diagonal Call",
+    plainTitle: "Build a lower-capital income setup on a stock you like",
     categories: ["bullish", "income"],
     purpose: "Create a covered-call-like income trade without buying 100 shares outright.",
     bestWhen:
@@ -477,6 +489,28 @@ const STRATEGY_MAP: Array<{
 ];
 
 const PRESET_TICKERS = ["AAPL", "TSLA", "NVDA", "SPY"];
+const CORE_STRATEGY_IDS = ["covered-call", "cash-secured-put", "bull-put-spread"];
+
+const TESTIMONIALS = [
+  {
+    name: "Maya Chen",
+    role: "Beginner options trader",
+    quote:
+      "OptionBot made the first step feel smaller. I started with AAPL and a goal, then understood why a covered call might fit before looking at contracts.",
+  },
+  {
+    name: "Daniel Rivera",
+    role: "Part-time investor",
+    quote:
+      "The scanner is useful because it explains the setup before showing numbers. I do not feel like I am reading an option chain alone.",
+  },
+  {
+    name: "Priya Shah",
+    role: "Portfolio income learner",
+    quote:
+      "The plain-English breakdown helped me compare income ideas without pretending I already knew every strategy name.",
+  },
+];
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="landing-section-label">{children}</div>;
@@ -616,14 +650,12 @@ function LanguagePicker({
 function StrategyCard({
   strategy,
   ticker,
+  onOpenAuth,
 }: {
   strategy: Strategy;
   ticker: string;
+  onOpenAuth: () => void;
 }) {
-  const loginHref = `/login?strategy=${encodeURIComponent(strategy.id)}&ticker=${encodeURIComponent(
-    ticker,
-  )}`;
-
   return (
     <article className="landing-panel landing-card-hover rounded-[1.75rem] p-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -639,7 +671,10 @@ function StrategyCard({
 
       <div className="mt-5 flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-2xl font-semibold text-white">{strategy.name}</h3>
+          <h3 className="text-2xl font-semibold text-white">{strategy.plainTitle}</h3>
+          <p className="mt-1 text-sm font-semibold text-emerald-200">
+            {strategy.name}
+          </p>
           <p className="mt-2 text-sm leading-6 text-slate-300">{strategy.purpose}</p>
         </div>
         <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-right text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
@@ -698,13 +733,14 @@ function StrategyCard({
           Learn this strategy
           <ArrowIcon />
         </a>
-        <Link
-          href={loginHref}
+        <button
+          type="button"
+          onClick={onOpenAuth}
           className="landing-primary-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
         >
-          Scan live setups
+          See free {ticker} setups
           <ArrowIcon />
-        </Link>
+        </button>
         <a
           href="#real-stock-examples"
           className="landing-outline-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-slate-100"
@@ -714,6 +750,520 @@ function StrategyCard({
         </a>
       </div>
     </article>
+  );
+}
+
+function MarketUpdateSignup() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("");
+    setError("");
+    setLoading(true);
+
+    try {
+      await subscribeMarketUpdates(email);
+      setEmail("");
+      setStatus("You are subscribed. We will send market updates and opportunity alerts to your email.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to subscribe right now. Please try again later.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section id="market-updates" className="px-6 py-14">
+      <div className="mx-auto max-w-6xl">
+        <div className="landing-panel rounded-[2rem] p-6 md:p-8">
+          <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
+            <div>
+              <SectionLabel>Free market updates</SectionLabel>
+              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white md:text-4xl">
+                Follow us to get free weekly market updates and opportunities alerts.
+              </h2>
+              <p className="mt-4 text-base leading-7 text-slate-300">
+                New visitors can subscribe for the free market update list. Signed-up
+                users will receive weekday opportunity alerts when the backend email
+                workflow is enabled.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Email address
+                </span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                  placeholder="you@example.com"
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-300/50"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={loading}
+                className="landing-primary-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? "Subscribing..." : "Subscribe for free"}
+                <ArrowIcon />
+              </button>
+              {status && <p className="mt-3 text-sm leading-6 text-emerald-200">{status}</p>}
+              {error && <p className="mt-3 text-sm leading-6 text-red-200">{error}</p>}
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                Educational market updates only. No individualized investment advice.
+              </p>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ContactUsWidget() {
+  const [open, setOpen] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("");
+    setError("");
+    setLoading(true);
+
+    try {
+      await sendContactMessage({
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        message,
+      });
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      setMessage("");
+      setStatus("Message sent. We will review it and follow up by email.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to send your message right now.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="landing-primary-button fixed bottom-5 right-5 z-[70] rounded-full px-5 py-3 text-sm font-semibold text-slate-950 shadow-2xl"
+      >
+        Contact Us
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-white/10 bg-gray-950 shadow-2xl">
+            <div className="border-b border-white/10 px-6 py-5 sm:px-8">
+              <h2 className="text-2xl font-bold text-white">Contact Us</h2>
+              <p className="mt-2 text-sm text-gray-400">
+                Send questions, concerns, or product feedback to the OptionBot team.
+              </p>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4 px-6 py-6 sm:px-8">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <input
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                  required
+                  placeholder="First name"
+                  className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none focus:border-emerald-400"
+                />
+                <input
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                  required
+                  placeholder="Last name"
+                  className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none focus:border-emerald-400"
+                />
+              </div>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                placeholder="Email"
+                className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none focus:border-emerald-400"
+              />
+              <label className="block">
+                <textarea
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value.slice(0, 1000))}
+                  required
+                  minLength={5}
+                  placeholder="Message"
+                  rows={7}
+                  className="w-full resize-none rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none focus:border-emerald-400"
+                />
+                <span className="mt-1 block text-right text-sm text-gray-500">
+                  {message.length} / 1000
+                </span>
+              </label>
+              {status && <p className="rounded-xl border border-emerald-700 bg-emerald-950/50 p-3 text-sm text-emerald-200">{status}</p>}
+              {error && <p className="rounded-xl border border-red-700 bg-red-950/50 p-3 text-sm text-red-200">{error}</p>}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-gray-700"
+              >
+                {loading ? "Sending..." : "Send Message"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="w-full rounded-xl border border-gray-700 px-4 py-3 font-medium text-gray-200 transition-colors hover:bg-gray-900 hover:text-white"
+              >
+                Close
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ProductPreview() {
+  const rows = [
+    ["AAPL", "Earn income from shares", "JUN 21 '26 210 Call", "0.31", "$3.45", "88"],
+    ["AAPL", "Get paid while waiting", "JUN 21 '26 185 Put", "-0.27", "$2.18", "84"],
+    ["AAPL", "Stock may hold up", "JUN 21 '26 190/185 Put", "-0.22", "$0.92", "81"],
+  ];
+
+  return (
+    <div className="landing-panel overflow-hidden rounded-[1.75rem]">
+      <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">
+            Product preview
+          </p>
+          <h3 className="mt-1 text-xl font-semibold text-white">AAPL live setups</h3>
+        </div>
+        <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-100">
+          No card needed
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-left text-sm">
+          <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-slate-500">
+            <tr>
+              <th className="px-5 py-3">Stock</th>
+              <th className="px-5 py-3">Plain-English fit</th>
+              <th className="px-5 py-3">Contract</th>
+              <th className="px-5 py-3">Delta</th>
+              <th className="px-5 py-3">Premium</th>
+              <th className="px-5 py-3">Score</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/10 text-slate-200">
+            {rows.map((row) => (
+              <tr key={row.join("-")}>
+                {row.map((cell, index) => (
+                  <td key={cell} className={`px-5 py-4 ${index === 5 ? "font-semibold text-emerald-200" : ""}`}>
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="border-t border-white/10 px-5 py-4 text-xs leading-5 text-slate-500">
+        Preview data is illustrative for the landing page. Always verify prices in
+        your broker before trading.
+      </div>
+    </div>
+  );
+}
+
+function AaplWalkthroughSection({
+  displayTicker,
+  selectedCategory,
+  setTicker,
+  openAuth,
+}: {
+  displayTicker: string;
+  selectedCategory: CategoryId;
+  setTicker: (ticker: string) => void;
+  openAuth: (mode?: "login" | "signup") => void;
+}) {
+  return (
+    <section id="real-stock-examples" className="px-6 py-14">
+      <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
+        <div>
+          <SectionLabel>Real AAPL example</SectionLabel>
+          <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+            See the idea on a stock you already recognize.
+          </h2>
+          <p className="mt-4 text-lg leading-8 text-slate-300">
+            Abstract option lessons get tiring. Here is the simple flow:
+            start with {displayTicker}, choose what you want the stock to do,
+            then review three setups that match the goal.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            {PRESET_TICKERS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setTicker(preset)}
+                className={`landing-chip rounded-full px-4 py-2 text-sm ${
+                  displayTicker === preset ? "landing-chip-active text-white" : "text-slate-300"
+                }`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          <div className="mt-7 space-y-4">
+            {[
+              `Start with ${displayTicker}, not a strategy name.`,
+              `Choose the goal: ${CATEGORY_META[selectedCategory].label}.`,
+              "Review only the setups that match that goal, with risk explained first.",
+            ].map((line) => (
+              <div key={line} className="flex items-start gap-3 rounded-[1.25rem] border border-white/10 bg-white/5 px-4 py-4">
+                <CheckIcon />
+                <p className="text-sm leading-6 text-slate-200">{line}</p>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => openAuth("signup")}
+            className="landing-primary-button mt-7 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-slate-950"
+          >
+            See free {displayTicker} setups
+            <ArrowIcon />
+          </button>
+        </div>
+        <ProductPreview />
+      </div>
+    </section>
+  );
+}
+
+function BeginnerReassuranceSection() {
+  return (
+    <section id="options-made-simple" className="px-6 py-14">
+      <div className="mx-auto max-w-6xl">
+        <div className="landing-panel rounded-[2rem] p-6 md:p-8">
+          <SectionLabel>Beginner-friendly by design</SectionLabel>
+          <div className="mt-4 grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
+            <div>
+              <h2 className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
+                You do not need to learn every options term first.
+              </h2>
+              <p className="mt-5 text-lg leading-8 text-slate-300">
+                OptionBot explains the trade in the order a beginner actually
+                thinks: what you want, when it can work, what can go wrong, and
+                what contract to review.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {[
+                ["1", "Start with the goal", "Income, protection, up, down, or sideways."],
+                ["2", "See fewer choices", "Three practical starting points, not a dictionary of strategies."],
+                ["3", "Review risk first", "Each setup explains the trade-off before the numbers."],
+              ].map(([step, title, body]) => (
+                <div key={step} className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
+                  <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-200">
+                    {step}
+                  </p>
+                  <h3 className="mt-3 text-lg font-semibold text-white">{title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-slate-300">{body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PricingSection({ openAuth }: { openAuth: (mode?: "login" | "signup") => void }) {
+  return (
+    <section id="pricing" className="px-6 py-14">
+      <div className="mx-auto max-w-6xl">
+        <SectionLabel>Pricing</SectionLabel>
+        <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+          Free until you are ready. Paid when you grow.
+        </h2>
+        <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-300">
+          Start without a card. Paid plans unlock more scans, deeper workflow, and
+          portfolio tools as the billing rollout finishes.
+        </p>
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {[
+            {
+              name: "Free",
+              price: "$0",
+              note: "No card needed",
+              features: ["3 scans per day", "Top 3 setups", "Market updates and opportunity alerts"],
+            },
+            {
+              name: "Pro",
+              price: "$19.99",
+              note: "per month",
+              features: ["30 scans per day", "Full result list", "Custom parameters and daily digest"],
+            },
+            {
+              name: "Max",
+              price: "$49.99",
+              note: "per month",
+              features: ["Unlimited scans", "Priority queue", "Expanded portfolio workflow"],
+            },
+          ].map((plan) => (
+            <article key={plan.name} className="landing-panel rounded-[1.75rem] p-6">
+              <h3 className="text-2xl font-semibold text-white">{plan.name}</h3>
+              <div className="mt-4 flex items-end gap-2">
+                <span className="text-5xl font-semibold text-white">{plan.price}</span>
+                <span className="pb-2 text-sm text-slate-400">{plan.note}</span>
+              </div>
+              <div className="mt-6 space-y-3">
+                {plan.features.map((feature) => (
+                  <div key={feature} className="flex items-start gap-3">
+                    <CheckIcon />
+                    <p className="text-sm leading-6 text-slate-200">{feature}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => openAuth("signup")}
+          className="landing-primary-button mt-8 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-slate-950"
+        >
+          Start free - no card needed
+          <ArrowIcon />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SocialProofSection() {
+  return (
+    <section className="px-6 py-14">
+      <div className="mx-auto max-w-6xl">
+        <SectionLabel>Trust signals</SectionLabel>
+        <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+          Built for traders who want clarity before action.
+        </h2>
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {TESTIMONIALS.map((item) => (
+            <article key={item.name} className="landing-panel rounded-[1.5rem] p-5">
+              <div className="flex items-center gap-3">
+                <div className="grid h-11 w-11 place-items-center rounded-full bg-emerald-300/15 text-sm font-semibold text-emerald-100">
+                  {item.name.split(" ").map((part) => part[0]).join("")}
+                </div>
+                <div>
+                  <p className="font-semibold text-white">{item.name}</p>
+                  <p className="text-xs text-slate-400">{item.role}</p>
+                </div>
+              </div>
+              <p className="mt-5 text-sm leading-7 text-slate-300">&quot;{item.quote}&quot;</p>
+            </article>
+          ))}
+        </div>
+        <div className="mt-6 rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5 text-sm leading-6 text-slate-300">
+          Works alongside your existing broker workflow. OptionBot does not place
+          trades for you; it helps you understand and review setups before you
+          verify the order in your broker.
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FuturePaceSection({ openAuth }: { openAuth: (mode?: "login" | "signup") => void }) {
+  return (
+    <section className="px-6 py-14">
+      <div className="mx-auto max-w-6xl">
+        <div className="landing-panel rounded-[2rem] p-6 md:p-8">
+          <SectionLabel>One month from now</SectionLabel>
+          <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+            What using OptionBot should feel like.
+          </h2>
+          <div className="mt-8 grid gap-4 md:grid-cols-4">
+            {[
+              "You open OptionBot in the morning.",
+              "It shows three AAPL setups that match your goal.",
+              "You understand the risk before the contract details.",
+              "You decide in minutes instead of losing another evening to videos.",
+            ].map((line, index) => (
+              <div key={line} className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
+                <p className="text-sm font-semibold text-emerald-200">0{index + 1}</p>
+                <p className="mt-3 text-sm leading-6 text-slate-200">{line}</p>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => openAuth("signup")}
+            className="landing-primary-button mt-8 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-slate-950"
+          >
+            Try free with AAPL
+            <ArrowIcon />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FAQSection() {
+  const items = [
+    ["Will OptionBot place trades for me?", "No. OptionBot is an education and scanning tool. You review the setup and place any trade in your broker."],
+    ["Do I need to know Greeks first?", "No. The page starts with plain-English goals, then shows key numbers only when they help the decision."],
+    ["Is the Free plan really free?", "Yes. The Free plan starts at $0 and does not require a card."],
+  ];
+
+  return (
+    <section className="px-6 py-14">
+      <div className="mx-auto max-w-6xl">
+        <SectionLabel>FAQ</SectionLabel>
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          {items.map(([question, answer]) => (
+            <article key={question} className="landing-panel rounded-[1.5rem] p-5">
+              <h3 className="text-lg font-semibold text-white">{question}</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">{answer}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -727,6 +1277,8 @@ export default function LandingPage() {
   const [experienceLevel, setExperienceLevel] =
     useState<ExperienceId>("beginner");
   const [language, setLanguage] = useState<LanguageId>("en");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
 
   useEffect(() => {
     let isActive = true;
@@ -818,6 +1370,11 @@ export default function LandingPage() {
     setSelectedCategory(goal);
   }
 
+  function openAuth(mode: "login" | "signup" = "signup") {
+    setAuthMode(mode);
+    setAuthOpen(true);
+  }
+
   if (checking) {
     return (
       <div className="landing-shell flex min-h-screen items-center justify-center text-white">
@@ -854,17 +1411,14 @@ export default function LandingPage() {
             aria-label="Landing page sections"
             className="landing-nav-scroll flex min-w-0 flex-1 items-center gap-2 overflow-x-auto whitespace-nowrap px-1 text-xs text-slate-300 sm:gap-4 sm:text-sm md:justify-center"
           >
-            <a href="#strategy-chooser" className="rounded-full px-2 py-2 hover:text-white sm:px-3">
-              {navCopy.strategyChooser}
-            </a>
-            <a href="#strategy-map" className="rounded-full px-2 py-2 hover:text-white sm:px-3">
-              {navCopy.strategyMap}
-            </a>
             <a
               href="#real-stock-examples"
               className="rounded-full px-2 py-2 hover:text-white sm:px-3"
             >
-              {navCopy.realStockExamples}
+              AAPL Example
+            </a>
+            <a href="#strategy-chooser" className="rounded-full px-2 py-2 hover:text-white sm:px-3">
+              3 Strategies
             </a>
             <a href="#pricing" className="rounded-full px-2 py-2 hover:text-white sm:px-3">
               {navCopy.pricing}
@@ -872,19 +1426,21 @@ export default function LandingPage() {
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
-            <Link
-              href="/login"
+            <button
+              type="button"
+              onClick={() => openAuth("login")}
               className="hidden text-sm text-slate-300 transition-colors hover:text-white sm:inline"
             >
               {navCopy.signIn}
-            </Link>
-            <Link
-              href="/login"
+            </button>
+            <button
+              type="button"
+              onClick={() => openAuth("signup")}
               className="landing-primary-button hidden items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold text-slate-950 sm:inline-flex lg:px-4"
             >
-              {navCopy.startFree}
+              Try free with AAPL
               <ArrowIcon />
-            </Link>
+            </button>
           </div>
         </div>
       </header>
@@ -903,20 +1459,19 @@ export default function LandingPage() {
                     </span>
                   </h1>
                   <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-                    OptionBot is not a generic options encyclopedia and not only a
-                    Wheel strategy pitch. It is a guided strategy discovery and
-                    scanning product that helps you move from a stock, a goal, and
-                    a comfort level into plain-English strategy choices and live
-                    setups.
+                    Tired of tutorials that assume you already know the jargon?
+                    You are not behind. Most options tools start in the wrong
+                    place. OptionBot starts with your stock, your goal, and your
+                    comfort level, then shows the setup that fits.
                   </p>
 
                   <div className="mt-8 flex flex-wrap gap-3">
                     {[
                       "Earn income",
                       "Protect shares",
-                      "Bullish",
-                      "Bearish",
-                      "Neutral",
+                      "Stock going up",
+                      "Stock going down",
+                      "Stock going sideways",
                     ].map((item) => (
                       <span
                         key={item}
@@ -1033,7 +1588,7 @@ export default function LandingPage() {
                       Recommended starting point for {displayTicker}
                     </p>
                     <h3 className="mt-3 text-2xl font-semibold text-white">
-                      {primaryRecommendation?.name ?? "Strategy finder loading"}
+                      {primaryRecommendation?.plainTitle ?? "Strategy finder loading"}
                     </h3>
                     <p className="mt-3 text-sm leading-6 text-emerald-50/90">
                       {goalMeta.summary} {goalMeta.coaching}
@@ -1049,7 +1604,7 @@ export default function LandingPage() {
                           key={strategy.id}
                           className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm text-white"
                         >
-                          {strategy.name}
+                          {strategy.plainTitle}
                         </span>
                       ))}
                     </div>
@@ -1058,16 +1613,17 @@ export default function LandingPage() {
                         href="#strategy-chooser"
                         className="landing-outline-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white"
                       >
-                        View matching strategies
+                        See the 3 best-fit strategies
                         <ArrowIcon />
                       </a>
-                      <Link
-                        href={`/login?ticker=${encodeURIComponent(displayTicker)}`}
+                      <button
+                        type="button"
+                        onClick={() => openAuth("signup")}
                         className="landing-primary-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
                       >
-                        Scan live setups
+                        See free {displayTicker} setups
                         <ArrowIcon />
-                      </Link>
+                      </button>
                     </div>
                   </div>
 
@@ -1084,9 +1640,9 @@ export default function LandingPage() {
                     Start from your goal
                   </p>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Income, protection, bullish, bearish, or neutral. The page
-                    narrows the choices before it asks you to think about strategy
-                    names.
+                    Income, protection, stock going up, stock going down, or
+                    stock going sideways. The page narrows the choices before it
+                    asks you to think about strategy names.
                   </p>
                 </div>
                 <div>
@@ -1112,7 +1668,58 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="options-made-simple" className="px-6 py-14">
+        <AaplWalkthroughSection
+          displayTicker={displayTicker}
+          selectedCategory={selectedCategory}
+          setTicker={setTicker}
+          openAuth={openAuth}
+        />
+
+        <section id="strategy-chooser" className="px-6 py-14">
+          <div className="mx-auto max-w-6xl">
+            <SectionLabel>Three practical starting points</SectionLabel>
+            <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h2 className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
+                  Start with three strategies, not a wall of jargon.
+                </h2>
+                <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-300">
+                  These are the most useful beginner starting points: one for
+                  shares you already own, one for buying lower, and one for income
+                  with defined risk.
+                </p>
+              </div>
+              <Link
+                href="/tutorial"
+                className="landing-outline-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white"
+              >
+                See the full strategy library
+                <ArrowIcon />
+              </Link>
+            </div>
+
+            <div className="mt-8 grid gap-6 lg:grid-cols-3">
+              {STRATEGIES.filter((strategy) =>
+                CORE_STRATEGY_IDS.includes(strategy.id),
+              ).map((strategy) => (
+                <StrategyCard
+                  key={strategy.id}
+                  strategy={strategy}
+                  ticker={displayTicker}
+                  onOpenAuth={() => openAuth("signup")}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <BeginnerReassuranceSection />
+        <PricingSection openAuth={openAuth} />
+        <SocialProofSection />
+        <FuturePaceSection openAuth={openAuth} />
+        <FAQSection />
+
+        <section id="legacy-options-made-simple" className="hidden">
           <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[0.9fr_1.1fr]">
             <div>
               <SectionLabel>Beginner-friendly by design</SectionLabel>
@@ -1175,7 +1782,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="strategy-chooser" className="px-6 py-14">
+        <section id="legacy-strategy-chooser" className="hidden">
           <div className="mx-auto max-w-6xl">
             <SectionLabel>Strategy chooser</SectionLabel>
             <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -1230,13 +1837,14 @@ export default function LandingPage() {
                   key={strategy.id}
                   strategy={strategy}
                   ticker={displayTicker}
+                  onOpenAuth={() => openAuth("signup")}
                 />
               ))}
             </div>
           </div>
         </section>
 
-        <section id="strategy-map" className="px-6 py-14">
+        <section id="legacy-strategy-map" className="hidden">
           <div className="mx-auto max-w-6xl">
             <SectionLabel>Strategy map</SectionLabel>
             <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
@@ -1276,7 +1884,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="real-stock-examples" className="px-6 py-14">
+        <section id="legacy-real-stock-examples" className="hidden">
           <div className="mx-auto max-w-6xl">
             <SectionLabel>Real stock examples</SectionLabel>
             <div className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -1342,13 +1950,14 @@ export default function LandingPage() {
                 </div>
 
                 <div className="mt-8 flex flex-wrap gap-3">
-                  <Link
-                    href={`/login?ticker=${encodeURIComponent(displayTicker)}`}
+                  <button
+                    type="button"
+                    onClick={() => openAuth("signup")}
                     className="landing-primary-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
                   >
                     See opportunities for {displayTicker}
                     <ArrowIcon />
-                  </Link>
+                  </button>
                   <a
                     href="#strategy-chooser"
                     className="landing-outline-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white"
@@ -1375,15 +1984,14 @@ export default function LandingPage() {
                       Best when: {strategy.bestWhen}
                     </p>
                     <div className="mt-5 flex flex-wrap gap-3">
-                      <Link
-                        href={`/login?strategy=${encodeURIComponent(strategy.id)}&ticker=${encodeURIComponent(
-                          displayTicker,
-                        )}`}
+                      <button
+                        type="button"
+                        onClick={() => openAuth("signup")}
                         className="landing-primary-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
                       >
                         Scan live setups
                         <ArrowIcon />
-                      </Link>
+                      </button>
                       <a
                         href="#options-made-simple"
                         className="landing-outline-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white"
@@ -1399,7 +2007,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="px-6 py-14">
+        <section className="hidden">
           <div className="mx-auto max-w-6xl">
             <div className="landing-panel rounded-[2rem] p-6 md:p-8">
               <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -1423,13 +2031,14 @@ export default function LandingPage() {
                     Learn this strategy
                     <ArrowIcon />
                   </a>
-                  <Link
-                    href={`/login?ticker=${encodeURIComponent(displayTicker)}`}
+                  <button
+                    type="button"
+                    onClick={() => openAuth("signup")}
                     className="landing-primary-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
                   >
                     Scan live setups
                     <ArrowIcon />
-                  </Link>
+                  </button>
                   <a
                     href="#real-stock-examples"
                     className="landing-outline-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white"
@@ -1468,7 +2077,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="pricing" className="px-6 py-14">
+        <section id="legacy-pricing" className="hidden">
           <div className="mx-auto max-w-6xl">
             <SectionLabel>Cleaner persuasion</SectionLabel>
             <div className="mt-4 grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
@@ -1501,6 +2110,7 @@ export default function LandingPage() {
                       "Goal-first strategy discovery",
                       "Beginner-friendly strategy explanations",
                       "A guided path from learning to scanner usage",
+                      "Free market updates and opportunity alerts",
                     ].map((line) => (
                       <div key={line} className="flex items-start gap-3">
                         <CheckIcon />
@@ -1508,13 +2118,14 @@ export default function LandingPage() {
                       </div>
                     ))}
                   </div>
-                  <Link
-                    href="/login"
+                  <button
+                    type="button"
+                    onClick={() => openAuth("signup")}
                     className="landing-primary-button mt-6 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
                   >
                     Create a free account
                     <ArrowIcon />
-                  </Link>
+                  </button>
                 </article>
 
                 <article className="landing-panel rounded-[1.75rem] p-6">
@@ -1545,28 +2156,30 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+
+        <MarketUpdateSignup />
       </main>
 
       <footer className="px-6 pb-0 pt-10">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 border-t border-white/10 pb-8 pt-8 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-sm text-slate-400">
-              OptionBot is positioned here as a guided strategy discovery and
-              scanning product, not a generic encyclopedia and not only a Wheel
-              strategy pitch.
+              OptionBot is a guided strategy discovery and scanning product for
+              traders who want plain English before contract details.
             </p>
             <p className="mt-2 text-xs text-slate-500">
               Options involve risk. Educational content is not a guarantee of
               results or individualized trade advice.
             </p>
           </div>
-          <Link
-            href="/login"
+          <button
+            type="button"
+            onClick={() => openAuth("signup")}
             className="landing-primary-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-950"
           >
             Start with a stock and a goal
             <ArrowIcon />
-          </Link>
+          </button>
         </div>
 
         <div className="relative z-10 -mx-6 border-t border-white/10 bg-white/[0.03] px-6 py-3">
@@ -1603,6 +2216,15 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      {authOpen && (
+        <AuthModal
+          open={authOpen}
+          initialMode={authMode}
+          onClose={() => setAuthOpen(false)}
+        />
+      )}
+      <ContactUsWidget />
     </div>
   );
 }
