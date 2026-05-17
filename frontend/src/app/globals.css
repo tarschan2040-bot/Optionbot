@@ -27,6 +27,62 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+html[data-theme="light"] {
+  --background: #f8fafc;
+  --foreground: #111827;
+}
+
+html[data-theme="light"] body {
+  background: #f8fafc;
+  color: #111827;
+}
+
+html[data-theme="light"] .bg-gray-950 {
+  background-color: #f8fafc !important;
+}
+
+html[data-theme="light"] .bg-gray-900 {
+  background-color: #ffffff !important;
+}
+
+html[data-theme="light"] .bg-gray-800 {
+  background-color: #e5e7eb !important;
+}
+
+html[data-theme="light"] .border-gray-800 {
+  border-color: #d1d5db !important;
+}
+
+html[data-theme="light"] .border-gray-700 {
+  border-color: #cbd5e1 !important;
+}
+
+html[data-theme="light"] .text-white {
+  color: #111827 !important;
+}
+
+html[data-theme="light"] .text-gray-200,
+html[data-theme="light"] .text-gray-300 {
+  color: #374151 !important;
+}
+
+html[data-theme="light"] .text-gray-400 {
+  color: #4b5563 !important;
+}
+
+html[data-theme="light"] .text-gray-500,
+html[data-theme="light"] .text-gray-600 {
+  color: #6b7280 !important;
+}
+
+html[data-theme="light"] input.bg-gray-950,
+html[data-theme="light"] select.bg-gray-950,
+html[data-theme="light"] input.bg-gray-800,
+html[data-theme="light"] select.bg-gray-800 {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
 html {
   scroll-behavior: smooth;
 }

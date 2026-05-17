@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSession } from "@/hooks/useSession";
 import Nav from "@/components/Nav";
 import { useRouter } from "next/navigation";
-import { getScanResults, triggerScan, getScanStatus, starCandidate } from "@/lib/api";
+import { getConfig, updateConfig, getScanResults, triggerScan, getScanStatus, starCandidate } from "@/lib/api";
 import Link from "next/link";
 
 interface ScanResult {
@@ -18,6 +18,21 @@ interface ScanData {
   config_hash: string | null; result_count: number; results: ScanResult[];
   tier: string | null; visible_results: number | null;
   scans_remaining: number | null; scans_per_day: number | null; can_scan: boolean;
+}
+
+interface ScannerConfig {
+  tickers: string[];
+  strategy: string;
+  min_dte: number;
+  max_dte: number;
+  min_premium: number;
+  min_annualised_return: number;
+  cc_delta_min: number;
+  cc_delta_max: number;
+  csp_delta_min: number;
+  csp_delta_max: number;
+  config_hash?: string;
+  [key: string]: unknown;
 }
 
 type SortKey = keyof ScanResult;
@@ -34,6 +49,10 @@ export default function ScanPage() {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [starred, setStarred] = useState<Set<string>>(new Set());
+  const [config, setConfig] = useState<ScannerConfig | null>(null);
+  const [tickerInput, setTickerInput] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configError, setConfigError] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
@@ -46,7 +65,20 @@ export default function ScanPage() {
     finally { setLoading(false); }
   }, [token]);
 
+  const loadConfig = useCallback(async () => {
+    if (!token) return;
+    try {
+      const d = await getConfig(token);
+      setConfig(d);
+      setTickerInput((d.tickers || []).join(", "));
+      setConfigError("");
+    } catch (err: unknown) {
+      setConfigError(err instanceof Error ? err.message : "Failed to load scan parameters.");
+    }
+  }, [token]);
+
   useEffect(() => { queueMicrotask(() => { void loadResults(); }); }, [loadResults]);
+  useEffect(() => { queueMicrotask(() => { void loadConfig(); }); }, [loadConfig]);
   useEffect(() => { return () => { if (pollRef.current) clearInterval(pollRef.current); if (timerRef.current) clearInterval(timerRef.current); }; }, []);
 
   // Tier info
@@ -72,6 +104,37 @@ export default function ScanPage() {
     else { setSortKey(key); setSortDir("desc"); }
   }
   function si(key: SortKey) { return sortKey !== key ? "" : sortDir === "asc" ? " ▲" : " ▼"; }
+  function setConfigField(field: keyof ScannerConfig, value: unknown) {
+    if (config) setConfig({ ...config, [field]: value });
+  }
+  function quickConfigPayload() {
+    if (!config) return null;
+    const tickers = tickerInput.split(/[,\s]+/).map((t) => t.trim().toUpperCase()).filter(Boolean);
+    const updates = { ...config, tickers };
+    delete (updates as Record<string, unknown>).config_hash;
+    return updates;
+  }
+  async function saveQuickConfig(showMessage = true) {
+    if (!token || !config) return;
+    setSavingConfig(true);
+    setConfigError("");
+    try {
+      const updates = quickConfigPayload();
+      if (!updates) return;
+      await updateConfig(token, updates);
+      setConfig({ ...config, tickers: updates.tickers as string[] });
+      if (showMessage) {
+        setScanMessage("Parameters saved.");
+        setTimeout(() => setScanMessage(""), 2500);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save scan parameters.";
+      setConfigError(msg);
+      throw err;
+    } finally {
+      setSavingConfig(false);
+    }
+  }
 
   function startPolling() {
     if (!token) return;
@@ -90,6 +153,7 @@ export default function ScanPage() {
     if (!token || !canScan) return;
     setScanning(true); setScanMessage(""); setElapsed(0);
     try {
+      await saveQuickConfig(false);
       const r = await triggerScan(token);
       setScanMessage(r.message);
       startPolling();
@@ -121,46 +185,201 @@ export default function ScanPage() {
     <div className="min-h-screen bg-gray-950 text-white">
       <Nav />
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Sub-nav + Scan button */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex gap-1 bg-gray-900 rounded-lg p-1 border border-gray-800">
-            <span className="px-4 py-2 rounded-md text-sm font-medium bg-gray-800 text-white">Results</span>
-            <Link href="/scan/parameters" className="px-4 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white transition-colors">Parameters</Link>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Scan counter */}
-            {scansPerDay != null && (
-              <div className="text-sm text-gray-400">
-                <span className={scansRemaining === 0 ? "text-red-400 font-medium" : "text-emerald-400 font-medium"}>
-                  {scansRemaining}
-                </span>
-                <span>/{scansPerDay} scans left today</span>
-              </div>
-            )}
-            {scansPerDay == null && tier === "max" && (
-              <div className="text-sm text-gray-400">Unlimited scans</div>
-            )}
-            <button
-              onClick={handleScan}
-              disabled={scanning || !canScan}
-              className={`px-6 py-2.5 font-medium rounded-lg transition-colors flex items-center gap-2 ${
-                !canScan
-                  ? "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"
-                  : scanning
-                  ? "bg-gray-700 text-gray-300"
-                  : "bg-emerald-600 hover:bg-emerald-500 text-white"
-              }`}
-            >
-              {scanning ? (
-                <><span className="inline-block animate-spin">⟳</span> Scanning... {elapsed > 0 && `${elapsed}s`}</>
-              ) : !canScan ? (
-                "Limit Reached"
-              ) : (
-                "Run Scan"
+        <section className="mb-6 rounded-xl border border-gray-800 bg-gray-900 p-5">
+          <h1 className="text-lg font-semibold text-white">How The Scan Works</h1>
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-gray-300">
+            OptionBot reviews the stocks and strategy settings you select, then screens available option contracts against your filters, including expiry range, strike, premium, delta, implied volatility, expected return, and risk limits.
+          </p>
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-gray-300">
+            Each result is scored and ranked so you can focus on the contracts that best match your criteria. You can star any contract you want to review later; starred ideas are saved to your portfolio candidate list, where you can take further action when ready.
+          </p>
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-gray-400">
+            The scan is designed to support your review process. It does not place trades or provide financial advice.
+          </p>
+        </section>
+
+        <section className="mb-6 rounded-xl border border-gray-800 bg-gray-900 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Current Scan Conditions</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-400">
+                Adjust the most common filters here, then start a scan with the same settings.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {scansPerDay != null && (
+                <div className="text-sm text-gray-400">
+                  <span className={scansRemaining === 0 ? "font-medium text-red-400" : "font-medium text-emerald-400"}>
+                    {scansRemaining}
+                  </span>
+                  <span>/{scansPerDay} scans left today</span>
+                </div>
               )}
-            </button>
+              {scansPerDay == null && tier === "max" && (
+                <div className="text-sm text-gray-400">Unlimited scans</div>
+              )}
+              <Link
+                href="/scan/parameters"
+                className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-gray-600 hover:bg-gray-800"
+              >
+                Parameter
+              </Link>
+              <button
+                onClick={handleScan}
+                disabled={scanning || savingConfig || !canScan}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  !canScan
+                    ? "cursor-not-allowed border border-gray-700 bg-gray-800 text-gray-500"
+                    : scanning || savingConfig
+                    ? "bg-gray-700 text-gray-300"
+                    : "bg-emerald-600 text-white hover:bg-emerald-500"
+                }`}
+              >
+                {scanning ? (
+                  <>Scanning... {elapsed > 0 && `${elapsed}s`}</>
+                ) : savingConfig ? (
+                  "Saving..."
+                ) : !canScan ? (
+                  "Limit Reached"
+                ) : (
+                  "Start Scan"
+                )}
+              </button>
+            </div>
           </div>
-        </div>
+
+          {configError && (
+            <div className="mt-4 rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+              {configError}
+            </div>
+          )}
+
+          {config ? (
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label className="space-y-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Tickers</span>
+                <input
+                  type="text"
+                  value={tickerInput}
+                  onChange={(e) => setTickerInput(e.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  placeholder="TSLA, NVDA, AAPL"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Strategy</span>
+                <select
+                  value={config.strategy}
+                  onChange={(e) => setConfigField("strategy", e.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="both">Covered Calls + Cash-Secured Puts</option>
+                  <option value="cc">Covered Calls only</option>
+                  <option value="csp">Cash-Secured Puts only</option>
+                </select>
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Min DTE</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={config.min_dte}
+                    onChange={(e) => setConfigField("min_dte", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Max DTE</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={config.max_dte}
+                    onChange={(e) => setConfigField("max_dte", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Min Premium</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.25}
+                    value={config.min_premium}
+                    onChange={(e) => setConfigField("min_premium", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Min Ann. Return %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={Number((config.min_annualised_return * 100).toFixed(1))}
+                    onChange={(e) => setConfigField("min_annualised_return", Number(e.target.value) / 100)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">CC Delta Min</span>
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={config.cc_delta_min}
+                    onChange={(e) => setConfigField("cc_delta_min", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">CC Delta Max</span>
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={config.cc_delta_max}
+                    onChange={(e) => setConfigField("cc_delta_max", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">CSP Delta Min</span>
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={config.csp_delta_min}
+                    onChange={(e) => setConfigField("csp_delta_min", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">CSP Delta Max</span>
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={config.csp_delta_max}
+                    onChange={(e) => setConfigField("csp_delta_max", Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-lg border border-gray-800 bg-gray-950 px-4 py-3 text-sm text-gray-500">
+              Loading current scan conditions...
+            </div>
+          )}
+        </section>
 
         {/* Limit reached upgrade prompt */}
         {!canScan && (
@@ -206,7 +425,7 @@ export default function ScanPage() {
         ) : !scanData || scanData.result_count === 0 ? (
           <div className="text-center py-20">
             <p className="text-gray-500 text-lg">No scan results yet.</p>
-            <p className="text-gray-600 text-sm mt-2">Click &quot;Run Scan&quot; to find opportunities.</p>
+            <p className="text-gray-600 text-sm mt-2">Click &quot;Start Scan&quot; to find opportunities.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
